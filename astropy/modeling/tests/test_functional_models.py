@@ -8,7 +8,7 @@ from numpy.testing import assert_allclose, assert_array_equal, assert_array_less
 from astropy.modeling import models, InputParameterError
 from astropy.coordinates import Angle
 from astropy.modeling import fitting
-from astropy.utils.exceptions import AstropyDeprecationWarning, AstropyUserWarning
+from astropy.utils.exceptions import AstropyUserWarning
 from astropy.utils.compat.optional_deps import HAS_SCIPY  # noqa
 
 
@@ -348,14 +348,16 @@ def test_ExponentialAndLogarithmic1D_fit():
     assert_allclose(xarr, log_model.inverse(log_model(xarr)))
 
 
-def test_deprecated_hat_kernel():
+@pytest.mark.parametrize('trig', [(models.Sine1D, [-0.25, 0.25]),
+                                  (models.ArcSine1D, [-0.25, 0.25]),
+                                  (models.Cosine1D, [0, 0.5]),
+                                  (models.ArcCosine1D, [0, 0.5]),
+                                  (models.Tangent1D, [-0.25, 0.25]),
+                                  (models.ArcTangent1D, [-0.25, 0.25])])
+def test_trig_inverse(trig):
+    mdl = trig[0]()
+    lower, upper = trig[1]
 
-    # 'MexicanHat' was deprecated as a name for the models which are now
-    # 'RickerWavelet'. This test ensures that the models are correctly
-    # deprecated.
-
-    with pytest.warns(AstropyDeprecationWarning):
-        models.MexicanHat1D()
-
-    with pytest.warns(AstropyDeprecationWarning):
-        models.MexicanHat2D()
+    x = np.arange(lower, upper, 0.01)
+    assert_allclose(mdl.inverse(mdl(x)), x, atol=1e-10)
+    assert_allclose(mdl(mdl.inverse(x)), x, atol=1e-10)

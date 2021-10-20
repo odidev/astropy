@@ -14,10 +14,8 @@
 Handles a "generic" string format for units
 """
 
-import os
 import re
 import warnings
-import sys
 from fractions import Fraction
 import unicodedata
 
@@ -25,17 +23,6 @@ from . import core, utils
 from .base import Base
 from astropy.utils import classproperty, parsing
 from astropy.utils.misc import did_you_mean
-
-
-def _is_ascii(s):
-    if sys.version_info >= (3, 7, 0):
-        return s.isascii()
-    else:
-        try:
-            s.encode('ascii')
-            return True
-        except UnicodeEncodeError:
-            return False
 
 
 def _to_string(cls, unit):
@@ -78,6 +65,7 @@ class Generic(Base):
     _show_scale = True
 
     _tokens = (
+        'COMMA',
         'DOUBLE_STAR',
         'STAR',
         'PERIOD',
@@ -120,6 +108,7 @@ class Generic(Base):
     def _make_lexer(cls):
         tokens = cls._tokens
 
+        t_COMMA = r'\,'
         t_STAR = r'\*'
         t_PERIOD = r'\.'
         t_SOLIDUS = r'/'
@@ -191,7 +180,60 @@ class Generic(Base):
 
         def p_main(p):
             '''
-            main : product_of_units
+            main : unit
+                 | structured_unit
+                 | structured_subunit
+            '''
+            if isinstance(p[1], tuple):
+                # Unpack possible StructuredUnit inside a tuple, ie.,
+                # ignore any set of very outer parentheses.
+                p[0] = p[1][0]
+            else:
+                p[0] = p[1]
+
+        def p_structured_subunit(p):
+            '''
+            structured_subunit : OPEN_PAREN structured_unit CLOSE_PAREN
+            '''
+            # We hide a structured unit enclosed by parentheses inside
+            # a tuple, so that we can easily distinguish units like
+            # "(au, au/day), yr" from "au, au/day, yr".
+            p[0] = (p[2],)
+
+        def p_structured_unit(p):
+            '''
+            structured_unit : subunit COMMA
+                            | subunit COMMA subunit
+            '''
+            from ..structured import StructuredUnit
+            inputs = (p[1],) if len(p) == 3 else (p[1], p[3])
+            units = ()
+            for subunit in inputs:
+                if isinstance(subunit, tuple):
+                    # Structured unit that should be its own entry in the
+                    # new StructuredUnit (was enclosed in parentheses).
+                    units += subunit
+                elif isinstance(subunit, StructuredUnit):
+                    # Structured unit whose entries should be
+                    # individiually added to the new StructuredUnit.
+                    units += subunit.values()
+                else:
+                    # Regular unit to be added to the StructuredUnit.
+                    units += (subunit,)
+
+            p[0] = StructuredUnit(units)
+
+        def p_subunit(p):
+            '''
+            subunit : unit
+                    | structured_unit
+                    | structured_subunit
+            '''
+            p[0] = p[1]
+
+        def p_unit(p):
+            '''
+            unit : product_of_units
                  | factor product_of_units
                  | factor product product_of_units
                  | division_product_of_units
@@ -446,16 +488,18 @@ class Generic(Base):
     @classmethod
     def _parse_unit(cls, s, detailed_exception=True):
         registry = core.get_current_unit_registry().registry
-        if s == '%':
-            return registry['percent']
+        if s in cls._unit_symbols:
+            s = cls._unit_symbols[s]
 
-        if not _is_ascii(s):
+        elif not s.isascii():
             if s[0] == '\N{MICRO SIGN}':
                 s = 'u' + s[1:]
-            if s[-1] == '\N{GREEK CAPITAL LETTER OMEGA}':
-                s = s[:-1] + 'Ohm'
-            elif s[-1] == '\N{LATIN CAPITAL LETTER A WITH RING ABOVE}':
-                s = s[:-1] + 'Angstrom'
+            if s[-1] in cls._prefixable_unit_symbols:
+                s = s[:-1] + cls._prefixable_unit_symbols[s[-1]]
+            elif len(s) > 1 and s[-1] in cls._unit_suffix_symbols:
+                s = s[:-1] + cls._unit_suffix_symbols[s[-1]]
+            elif s.endswith('R\N{INFINITY}'):
+                s = s[:-2] + 'Ry'
 
         if s in registry:
             return registry[s]
@@ -465,6 +509,30 @@ class Generic(Base):
                 f'{s} is not a valid unit. {did_you_mean(s, registry)}')
         else:
             raise ValueError()
+
+    _unit_symbols = {
+        '%': 'percent',
+        '\N{PRIME}': 'arcmin',
+        '\N{DOUBLE PRIME}': 'arcsec',
+        '\N{MODIFIER LETTER SMALL H}': 'hourangle',
+        'e\N{SUPERSCRIPT MINUS}': 'electron',
+    }
+
+    _prefixable_unit_symbols = {
+        '\N{GREEK CAPITAL LETTER OMEGA}': 'Ohm',
+        '\N{LATIN CAPITAL LETTER A WITH RING ABOVE}': 'Angstrom',
+        '\N{SCRIPT SMALL L}': 'l',
+    }
+
+    _unit_suffix_symbols = {
+        '\N{CIRCLED DOT OPERATOR}': 'sun',
+        '\N{SUN}': 'sun',
+        '\N{CIRCLED PLUS}': 'earth',
+        '\N{EARTH}': 'earth',
+        '\N{JUPITER}': 'jupiter',
+        '\N{LATIN SUBSCRIPT SMALL LETTER E}': '_e',
+        '\N{LATIN SUBSCRIPT SMALL LETTER P}': '_p',
+    }
 
     _translations = str.maketrans({
         '\N{GREEK SMALL LETTER MU}': '\N{MICRO SIGN}',
@@ -492,7 +560,7 @@ class Generic(Base):
     )
 
     _superscript_translations = str.maketrans(_superscripts, '-+0123456789')
-    _regex_superscript = re.compile(f'[{_superscripts}]+')
+    _regex_superscript = re.compile(f'[{_superscripts}]?[{_superscripts[2:]}]+')
     _regex_deg = re.compile('°([CF])?')
 
     @classmethod
@@ -509,7 +577,7 @@ class Generic(Base):
     def parse(cls, s, debug=False):
         if not isinstance(s, str):
             s = s.decode('ascii')
-        elif not _is_ascii(s):
+        elif not s.isascii():
             # common normalization of unicode strings to avoid
             # having to deal with multiple representations of
             # the same character. This normalizes to "composed" form

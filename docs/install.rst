@@ -29,8 +29,13 @@ can also do::
 
     pip install astropy --no-deps
 
-On the other hand, if you want to install ``astropy`` along with all of the
-available optional dependencies, you can do::
+On the other hand, if you want to install ``astropy`` along with recommended
+or even all of the available optional :ref:`dependencies <astropy-main-req>`,
+you can do::
+
+    pip install astropy[recommended]
+
+or::
 
     pip install astropy[all]
 
@@ -72,11 +77,16 @@ There may be a delay of a day or two between when a new version of ``astropy``
 is released and when a package is available for conda. You can check
 for the list of available versions with ``conda search astropy``.
 
-It is highly recommended that you install all of the optional dependencies with::
+If you want to install ``astropy`` along with recommended or all of the
+available optional :ref:`dependencies <astropy-main-req>`, you can do::
 
-    conda install -c astropy -c defaults \
-      scipy h5py beautifulsoup4 html5lib bleach pyyaml pandas sortedcontainers \
-      pytz matplotlib setuptools mpmath bottleneck jplephem asdf
+    conda install -c conda-forge -c defaults scipy matplotlib
+
+or::
+
+    conda install -c conda-forge -c defaults scipy matplotlib \
+      h5py beautifulsoup4 html5lib bleach pandas sortedcontainers \
+      pytz setuptools mpmath bottleneck jplephem asdf
 
 To also be able to run tests (see below) and support :ref:`builddocs` use the
 following. We use ``pip`` for these packages to ensure getting the latest
@@ -129,10 +139,20 @@ Requirements
 
 - `PyERFA`_ |minimum_pyerfa_version| or later
 
-``astropy`` also depends on other packages for optional features:
+- `PyYAML <https://pyyaml.org>`_ |minimum_pyyaml_version| or later
+
+- `packaging`_ |minimum_packaging_version| or later
+
+``astropy`` also depends on a number of other packages for optional features.
+The following are particularly recommended:
 
 - `scipy`_ |minimum_scipy_version| or later: To power a variety of features
   in several modules.
+
+- `matplotlib <https://matplotlib.org/>`_ |minimum_matplotlib_version| or later: To provide plotting
+  functionality that `astropy.visualization` enhances.
+
+The further dependencies provide more specific features:
 
 - `h5py <http://www.h5py.org/>`_: To read/write
   :class:`~astropy.table.Table` objects from/to HDF5 files.
@@ -146,10 +166,6 @@ Requirements
 
 - `bleach <https://bleach.readthedocs.io/>`_: Used to sanitize text when
   disabling HTML escaping in the :class:`~astropy.table.Table` HTML writer.
-
-- `PyYAML <https://pyyaml.org>`_ |minimum_pyyaml_version| or later: To read/write
-  :class:`~astropy.table.Table` objects from/to the Enhanced CSV ASCII table
-  format and to serialize mixins for various formats.
 
 - `xmllint <http://www.xmlsoft.org/>`_: To validate VOTABLE XML files.
   This is a command line tool installed outside of Python.
@@ -168,9 +184,6 @@ Requirements
 
 - `jplephem <https://pypi.org/project/jplephem/>`_: To retrieve JPL
   ephemeris of Solar System objects.
-
-- `matplotlib <https://matplotlib.org/>`_ |minimum_matplotlib_version| or later: To provide plotting
-  functionality that `astropy.visualization` enhances.
 
 - `setuptools <https://setuptools.readthedocs.io>`_: Used for discovery of
   entry points which are used to insert fitters into `astropy.modeling.fitting`.
@@ -435,7 +448,7 @@ documentation, you will need to make sure that a number of dependencies are
 installed. If you use conda, the easiest way to install the dependencies is
 with::
 
-    conda install -c astropy sphinx-astropy
+    conda install -c conda-forge sphinx-astropy
 
 Without conda, you install the dependencies by specifying ``[docs]`` when
 installing ``astropy`` with pip::

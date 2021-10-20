@@ -374,16 +374,17 @@ def set_enabled_units(units):
     >>> u.m.find_equivalent_units()
       Primary name | Unit definition | Aliases
     [
-      AU           | 1.49598e+11 m   | au, astronomical_unit ,
-      Angstrom     | 1e-10 m         | AA, angstrom          ,
-      cm           | 0.01 m          | centimeter            ,
-      earthRad     | 6.3781e+06 m    | R_earth, Rearth       ,
+      AU           | 1.49598e+11 m   | au, astronomical_unit            ,
+      Angstrom     | 1e-10 m         | AA, angstrom                     ,
+      cm           | 0.01 m          | centimeter                       ,
+      earthRad     | 6.3781e+06 m    | R_earth, Rearth                  ,
       jupiterRad   | 7.1492e+07 m    | R_jup, Rjup, R_jupiter, Rjupiter ,
-      lyr          | 9.46073e+15 m   | lightyear             ,
-      m            | irreducible     | meter                 ,
-      micron       | 1e-06 m         |                       ,
-      pc           | 3.08568e+16 m   | parsec                ,
-      solRad       | 6.957e+08 m     | R_sun, Rsun           ,
+      lsec         | 2.99792e+08 m   | lightsecond                      ,
+      lyr          | 9.46073e+15 m   | lightyear                        ,
+      m            | irreducible     | meter                            ,
+      micron       | 1e-06 m         |                                  ,
+      pc           | 3.08568e+16 m   | parsec                           ,
+      solRad       | 6.957e+08 m     | R_sun, Rsun                      ,
     ]
     """
     # get a context with a new registry, using equivalencies of the current one
@@ -423,23 +424,24 @@ def add_enabled_units(units):
     ...
       Primary name | Unit definition | Aliases
     [
-      AU           | 1.49598e+11 m   | au, astronomical_unit ,
-      Angstrom     | 1e-10 m         | AA, angstrom          ,
-      cm           | 0.01 m          | centimeter            ,
-      earthRad     | 6.3781e+06 m    | R_earth, Rearth       ,
-      ft           | 0.3048 m        | foot                  ,
-      fur          | 201.168 m       | furlong               ,
-      inch         | 0.0254 m        |                       ,
+      AU           | 1.49598e+11 m   | au, astronomical_unit            ,
+      Angstrom     | 1e-10 m         | AA, angstrom                     ,
+      cm           | 0.01 m          | centimeter                       ,
+      earthRad     | 6.3781e+06 m    | R_earth, Rearth                  ,
+      ft           | 0.3048 m        | foot                             ,
+      fur          | 201.168 m       | furlong                          ,
+      inch         | 0.0254 m        |                                  ,
       jupiterRad   | 7.1492e+07 m    | R_jup, Rjup, R_jupiter, Rjupiter ,
-      lyr          | 9.46073e+15 m   | lightyear             ,
-      m            | irreducible     | meter                 ,
-      mi           | 1609.34 m       | mile                  ,
-      micron       | 1e-06 m         |                       ,
-      mil          | 2.54e-05 m      | thou                  ,
-      nmi          | 1852 m          | nauticalmile, NM      ,
-      pc           | 3.08568e+16 m   | parsec                ,
-      solRad       | 6.957e+08 m     | R_sun, Rsun           ,
-      yd           | 0.9144 m        | yard                  ,
+      lsec         | 2.99792e+08 m   | lightsecond                      ,
+      lyr          | 9.46073e+15 m   | lightyear                        ,
+      m            | irreducible     | meter                            ,
+      mi           | 1609.34 m       | mile                             ,
+      micron       | 1e-06 m         |                                  ,
+      mil          | 2.54e-05 m      | thou                             ,
+      nmi          | 1852 m          | nauticalmile, NM                 ,
+      pc           | 3.08568e+16 m   | parsec                           ,
+      solRad       | 6.957e+08 m     | R_sun, Rsun                      ,
+      yd           | 0.9144 m        | yard                             ,
     ]
     """
     # get a context with a new registry, which is a copy of the current one
@@ -870,6 +872,13 @@ class UnitBase:
             self._hash = hash(tuple(parts))
         return self._hash
 
+    def __getstate__(self):
+        # If we get pickled, we should *not* store the memoized hash since
+        # hashes of strings vary between sessions.
+        state = self.__dict__.copy()
+        state.pop('_hash', None)
+        return state
+
     def __eq__(self, other):
         if self is other:
             return True
@@ -921,7 +930,7 @@ class UnitBase:
 
         equivalencies : list of tuple
             A list of equivalence pairs to try if the units are not
-            directly convertible.  See :ref:`unit_equivalencies`.
+            directly convertible.  See :ref:`astropy:unit_equivalencies`.
             This list is in addition to possible global defaults set by, e.g.,
             `set_enabled_equivalencies`.
             Use `None` to turn off all equivalencies.
@@ -1104,7 +1113,7 @@ class UnitBase:
 
         equivalencies : list of tuple
             A list of equivalence pairs to try if the units are not
-            directly convertible.  See :ref:`unit_equivalencies`.
+            directly convertible.  See :ref:`astropy:unit_equivalencies`.
             This list is in addition to possible global defaults set by, e.g.,
             `set_enabled_equivalencies`.
             Use `None` to turn off all equivalencies.
@@ -1286,7 +1295,7 @@ class UnitBase:
         ----------
         equivalencies : list of tuple
             A list of equivalence pairs to also list.  See
-            :ref:`unit_equivalencies`.
+            :ref:`astropy:unit_equivalencies`.
             This list is in addition to possible global defaults set by, e.g.,
             `set_enabled_equivalencies`.
             Use `None` to turn off all equivalencies.
@@ -1521,7 +1530,7 @@ class UnitBase:
         ----------
         equivalencies : list of tuple
             A list of equivalence pairs to also pull options from.
-            See :ref:`unit_equivalencies`.  It must already be
+            See :ref:`astropy:unit_equivalencies`.  It must already be
             normalized using `_normalize_equivalencies`.
         """
         unit_registry = get_current_unit_registry()
@@ -1617,7 +1626,7 @@ class UnitBase:
         ----------
         equivalencies : list of tuple
             A list of equivalence pairs to also list.  See
-            :ref:`unit_equivalencies`.
+            :ref:`astropy:unit_equivalencies`.
             Any list given, including an empty one, supersedes global defaults
             that may be in effect (as set by `set_enabled_equivalencies`)
 
@@ -1856,7 +1865,7 @@ class IrreducibleUnit(NamedUnit):
         registry = get_current_unit_registry().registry
         return (_recreate_irreducible_unit,
                 (self.__class__, list(self.names), self.name in registry),
-                self.__dict__)
+                self.__getstate__())
 
     @property
     def represents(self):
@@ -2013,6 +2022,8 @@ class _UnitMetaClass(type):
 
             try:
                 return f.parse(s)
+            except NotImplementedError:
+                raise
             except Exception as e:
                 if parse_strict == 'silent':
                     pass
@@ -2042,6 +2053,10 @@ class _UnitMetaClass(type):
 
         elif isinstance(s, (int, float, np.floating, np.integer)):
             return CompositeUnit(s, [], [], _error_check=False)
+
+        elif isinstance(s, tuple):
+            from .structured import StructuredUnit
+            return StructuredUnit(s)
 
         elif s is None:
             raise TypeError("None is not a valid Unit")

@@ -11,11 +11,11 @@ import numpy as np
 from astropy.io import registry as io_registry
 from astropy import units as u
 from astropy.table import Table, serialize, meta, Column, MaskedColumn
-from astropy.table.table import has_info_class
 from astropy.time import Time
-from astropy.utils.data_info import MixinInfo, serialize_context_as
+from astropy.utils.data_info import serialize_context_as
 from astropy.utils.exceptions import (AstropyUserWarning,
                                       AstropyDeprecationWarning)
+from astropy.utils.misc import NOT_OVERWRITING_MSG
 from . import HDUList, TableHDU, BinTableHDU, GroupsHDU, append as fits_append
 from .column import KEYWORD_NAMES, _fortran_to_python_format
 from .convenience import table_to_hdu
@@ -92,20 +92,7 @@ def _decode_mixins(tbl):
     if not tbl.meta['comments']:
         del tbl.meta['comments']
 
-    try:
-        info = meta.get_header_from_yaml(lines)
-    except ImportError as exc:
-        if 'PyYAML package is required' in str(exc):
-            warnings.warn(
-                "the file contains information about Astropy native objects "
-                "(mixin columns) that have been serialized when writing it, "
-                "but the PyYAML package is required to read those. Without "
-                "this package some information will be missing in the table",
-                AstropyUserWarning
-            )
-            return tbl
-        else:
-            raise
+    info = meta.get_header_from_yaml(lines)
 
     # Add serialized column information to table meta for use in constructing mixins
     tbl.meta['__serialized_columns__'] = info['meta']['__serialized_columns__']
@@ -239,15 +226,19 @@ def read_table_fits(input, hdu=None, astropy_native=False, memmap=False,
         # presence of FITS mask values. For integer columns, this is simply
         # the null header, for float and complex, the presence of NaN, and for
         # string, empty strings.
+        # Since Multi-element columns with dtypes such as '2f8' have a subdtype,
+        # we should look up the type of column on that.
         masked = mask = False
+        coltype = (col.dtype.subdtype[0].type if col.dtype.subdtype
+                   else col.dtype.type)
         if col.null is not None:
             mask = data[col.name] == col.null
             # Return a MaskedColumn even if no elements are masked so
             # we roundtrip better.
             masked = True
-        elif issubclass(col.dtype.type, np.inexact):
+        elif issubclass(coltype, np.inexact):
             mask = np.isnan(data[col.name])
-        elif issubclass(col.dtype.type, np.character):
+        elif issubclass(coltype, np.character):
             mask = col.array == b''
 
         if masked or np.any(mask):
@@ -323,30 +314,6 @@ def _encode_mixins(tbl):
     info_lost = any(any(getattr(col.info, attr, None) not in (None, {})
                         for attr in ('description', 'meta'))
                     for col in tbl.itercols())
-
-    # If PyYAML is not available then check to see if there are any mixin cols
-    # that *require* YAML serialization.  FITS already has support for Time,
-    # Quantity, so if those are the only mixins the proceed without doing the
-    # YAML bit, for backward compatibility (i.e. not requiring YAML to write
-    # Time or Quantity).  In this case other mixin column meta (e.g.
-    # description or meta) will be silently dropped, consistent with astropy <=
-    # 2.0 behavior.
-    try:
-        import yaml  # noqa
-    except ImportError:
-        for col in tbl.itercols():
-            if (has_info_class(col, MixinInfo) and
-                    col.__class__ not in (u.Quantity, Time)):
-                raise TypeError("cannot write type {} column '{}' "
-                                "to FITS without PyYAML installed."
-                                .format(col.__class__.__name__, col.info.name))
-        else:
-            if info_lost:
-                warnings.warn("table contains column(s) with defined 'format',"
-                              " 'description', or 'meta' info attributes. These"
-                              " will be dropped unless you install PyYAML.",
-                              AstropyUserWarning)
-            return tbl
 
     # Convert the table to one with no mixins, only Column objects.  This adds
     # meta data which is extracted with meta.get_yaml_from_table.  This ignores
@@ -434,7 +401,7 @@ def write_table_fits(input, output, overwrite=False, append=False):
         if overwrite:
             os.remove(output)
         elif not append:
-            raise OSError(f"File exists: {output}")
+            raise OSError(NOT_OVERWRITING_MSG.format(output))
 
     if append:
         # verify=False stops it reading and checking the existing file.

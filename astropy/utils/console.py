@@ -121,7 +121,7 @@ def isatty(file):
     ttys.
     """
     if (multiprocessing.current_process().name != 'MainProcess' or
-            threading.current_thread().getName() != 'MainThread'):
+            threading.current_thread().name != 'MainThread'):
         return False
 
     if hasattr(file, 'isatty'):
@@ -804,10 +804,8 @@ class ProgressBar:
                         bar.update(i)
             else:
                 ctx = multiprocessing.get_context(multiprocessing_start_method)
-                if sys.version_info >= (3, 7):
-                    kwargs = dict(mp_context=ctx)
-                else:
-                    kwargs = {}
+                kwargs = dict(mp_context=ctx)
+
                 with ProcessPoolExecutor(
                         max_workers=(int(multiprocess)
                                      if multiprocess is not True
@@ -831,7 +829,7 @@ class Spinner:
 
         with Spinner("Reticulating splines", "green") as s:
             for item in enumerate(items):
-                s.next()
+                s.update()
     """
     _default_unicode_chars = "◓◑◒◐"
     _default_ascii_chars = "-/|\\"
@@ -880,6 +878,11 @@ class Spinner:
 
         self._silent = not isatty(file)
 
+        if self._silent:
+            self._iter = self._silent_iterator()
+        else:
+            self._iter = self._iterator()
+
     def _iterator(self):
         chars = self._chars
         index = 0
@@ -912,10 +915,7 @@ class Spinner:
             index = (index + 1) % len(chars)
 
     def __enter__(self):
-        if self._silent:
-            return self._silent_iterator()
-        else:
-            return self._iterator()
+        return self
 
     def __exit__(self, exc_type, exc_value, traceback):
         file = self._file
@@ -930,6 +930,24 @@ class Spinner:
         else:
             color_print(' [Failed]', 'red', file=file)
         flush()
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        next(self._iter)
+
+    def update(self, value=None):
+        """Update the spin wheel in the terminal.
+
+        Parameters
+        ----------
+        value : int, optional
+            Ignored (present just for compatibility with `ProgressBar.update`).
+
+        """
+
+        next(self)
 
     def _silent_iterator(self):
         color_print(self._msg, self._color, file=self._file, end='')
@@ -997,7 +1015,6 @@ class ProgressBarOrSpinner:
             self._obj = ProgressBar(total, file=file)
 
     def __enter__(self):
-        self._iter = self._obj.__enter__()
         return self
 
     def __exit__(self, exc_type, exc_value, traceback):
@@ -1008,10 +1025,7 @@ class ProgressBarOrSpinner:
         Update the progress bar to the given value (out of the total
         given to the constructor.
         """
-        if self._is_spinner:
-            next(self._iter)
-        else:
-            self._obj.update(value)
+        self._obj.update(value)
 
 
 def print_code_line(line, col=None, file=None, tabwidth=8, width=70):
@@ -1064,7 +1078,7 @@ def print_code_line(line, col=None, file=None, tabwidth=8, width=70):
 
     if col is not None:
         if col >= len(line):
-            raise ValueError('col must be less the the line lenght.')
+            raise ValueError('col must be less the the line length.')
         ntabs = line[:col].count('\t')
         col += ntabs * (tabwidth - 1)
 

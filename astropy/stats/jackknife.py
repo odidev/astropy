@@ -2,8 +2,6 @@
 
 import numpy as np
 
-from astropy.utils.decorators import deprecated_renamed_argument
-
 __all__ = ['jackknife_resampling', 'jackknife_stats']
 __doctest_requires__ = {'jackknife_stats': ['scipy']}
 
@@ -33,7 +31,7 @@ def jackknife_resampling(data):
     References
     ----------
     .. [1] McIntosh, Avery. "The Jackknife Estimation Method".
-        <http://people.bu.edu/aimcinto/jackknife.pdf>
+        <https://arxiv.org/abs/1606.00497>
 
     .. [2] Efron, Bradley. "The Jackknife, the Bootstrap, and other
         Resampling Plans". Technical Report No. 63, Division of Biostatistics,
@@ -54,7 +52,6 @@ def jackknife_resampling(data):
     return resamples
 
 
-@deprecated_renamed_argument('conf_lvl', 'confidence_level', '4.0')
 def jackknife_stats(data, statistic, confidence_level=0.95):
     """Performs jackknife estimation on the basis of jackknife resamples.
 

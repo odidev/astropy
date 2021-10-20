@@ -17,9 +17,6 @@ from .powerlaws import *
 from .tabular import *
 from . import math_functions as math
 
-# Deprecated models that are not defined in __all__
-from .functional_models import MexicanHat1D, MexicanHat2D
-
 
 # Attach a docstring explaining constraints to all models which support them.
 # Note: add new models to this list
@@ -60,7 +57,9 @@ MODELS_WITH_CONSTRAINTS = [
     Const1D, Const2D, Ellipse2D, Disk2D,
     Gaussian1D, Gaussian2D,
     Linear1D, Lorentz1D, RickerWavelet1D, RickerWavelet2D,
-    PowerLaw1D, Sersic1D, Sersic2D, Sine1D, Trapezoid1D, TrapezoidDisk2D,
+    PowerLaw1D, Sersic1D, Sersic2D,
+    Sine1D, Cosine1D, Tangent1D, ArcSine1D, ArcCosine1D, ArcTangent1D,
+    Trapezoid1D, TrapezoidDisk2D,
     Chebyshev1D, Chebyshev2D, Hermite1D, Hermite2D, Legendre2D, Legendre1D,
     Polynomial1D, Polynomial2D, Voigt1D, KingProjectedAnalytic1D,
     NFW

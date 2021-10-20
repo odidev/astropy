@@ -220,11 +220,10 @@ def treat_deprecations_as_exceptions():
     # this iteration thus we copy the original state to a list to iterate
     # on. See https://github.com/astropy/astropy/pull/5513.
     for module in list(sys.modules.values()):
-        # We don't want to deal with six.MovedModules, only "real"
-        # modules. FIXME: we no more use six, this should be useless ?
-        if (isinstance(module, types.ModuleType) and
-                hasattr(module, '__warningregistry__')):
+        try:
             del module.__warningregistry__
+        except AttributeError:
+            pass
 
     if not _deprecations_as_exceptions:
         return
@@ -268,17 +267,6 @@ def treat_deprecations_as_exceptions():
         if v is None or sys.version_info[:2] == v:
             for s in _warnings_to_ignore_by_pyver[v]:
                 warnings.filterwarnings("ignore", s[0], s[1])
-
-    # If using Matplotlib < 3, we should ignore the following warning since
-    # this is beyond our control
-    try:
-        import matplotlib
-    except ImportError:
-        pass
-    else:
-        if matplotlib.__version__[0] < '3':
-            warnings.filterwarnings('ignore', category=DeprecationWarning,
-                                    module='numpy.lib.type_check')
 
 
 # TODO: Plan a roadmap of deprecation as pytest.warns has matured over the years.
@@ -435,7 +423,7 @@ def generic_recursive_equality_test(a, b, class_history):
     Check if the attributes of a and b are equal. Then,
     check if the attributes of the attributes are equal.
     """
-    dict_a = a.__dict__
+    dict_a = a.__getstate__() if hasattr(a, '__getstate__') else a.__dict__
     dict_b = b.__dict__
     for key in dict_a:
         assert key in dict_b,\

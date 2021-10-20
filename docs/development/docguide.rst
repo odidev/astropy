@@ -43,7 +43,7 @@ the standard Astropy docstring format.
 
 * All documentation should be written using the `Sphinx`_
   documentation tool.
-  
+
 * ReST substitutions are centralized in ``docs/conf.py::rst_epilog`` for
   consistency across the documentation and docstrings. These should be used over
   custom redefinitions; and new substitutions should probably be placed there.
@@ -56,12 +56,23 @@ the standard Astropy docstring format.
 * Docstrings should follow the `numpydoc format
   <https://numpydoc.readthedocs.io/en/latest/format.html>`_.
 
+* References in docstrings, **including internal Astropy links**, should use the
+  `intersphinx format
+  <https://www.sphinx-doc.org/en/master/usage/extensions/intersphinx.html>`_.
+  For example a link to the Astropy section on unit equivalencies would be
+  `` :ref:`astropy:unit_equivalencies` ``.
+  When built in Astropy, links starting with 'astropy' resolve to the current
+  build. In affiliate packages using ``sphinx-astropy``'s intersphinx mapping,
+  the links resolve to the stable version of Astropy. For linking to the
+  development version, use the intersphinx target 'astropy-dev'.
+
 * Examples and/or tutorials are strongly encouraged for typical use-cases of a
   particular module or class.
 
 * Any external package dependencies must be explicitly mentioned in the
   documentation. They should also be recorded in the ``setup.cfg`` file in the
-  root of the astropy repository using an ``extras_require`` entry.
+  root of the astropy repository using an entry in ``extras_require``,
+  under ``all``.
 
 * Configuration options using the :mod:`astropy.config` mechanisms must be
   explicitly mentioned in the documentation.

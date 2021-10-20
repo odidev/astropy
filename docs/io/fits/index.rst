@@ -146,10 +146,7 @@ file as ``-32768``, along with the header keyword ``BZERO = 32768``.
 
 ``astropy`` recognizes and applies this convention by default, so that all data
 that looks like it should be interpreted as unsigned integers is automatically
-converted (this applies to both images and tables). In ``astropy`` versions
-prior to v1.1.0 this was *not* applied automatically, and it is necessary to
-pass the argument ``uint=True`` to :func:`open`. In v1.1.0 or later this is the
-default.
+converted (this applies to both images and tables).
 
 Even with ``uint=False``, the ``BZERO`` shift is still applied, but the
 returned array is of "float64" type. To disable scaling/shifting entirely, use
@@ -468,6 +465,7 @@ attribute::
     >>> fits_table_filename = fits.util.get_testdata_filepath('tb.fits')
     >>> hdul = fits.open(fits_table_filename)
     >>> data = hdul[1].data # assuming the first extension is a table
+    >>> hdul.close()
 
 If you are familiar with ``numpy`` `~numpy.recarray` (record array) objects, you
 will find the table data is basically a record array with some extra
@@ -929,7 +927,7 @@ accepted by the :class:`FITSDiff` class.
     from astropy.io.fits import printdiff
     # get a difference report of ext 2 of inA and inB
     printdiff('inA.fits', 'inB.fits', ext=2)
-    # ignore HISTORY and COMMMENT keywords
+    # ignore HISTORY and COMMENT keywords
     printdiff('inA.fits', 'inB.fits', ignore_keywords=('HISTORY','COMMENT')
 
 Finally, the :func:`info` function will print out information of the specified

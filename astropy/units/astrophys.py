@@ -31,11 +31,11 @@ def_unit(['pc', 'parsec'], _si.pc, namespace=_ns, prefixes=True,
 
 def_unit(['solRad', 'R_sun', 'Rsun'], _si.R_sun, namespace=_ns,
          doc="Solar radius", prefixes=False,
-         format={'latex': r'R_{\odot}', 'unicode': 'R⊙'})
+         format={'latex': r'R_{\odot}', 'unicode': 'R\N{SUN}'})
 def_unit(['jupiterRad', 'R_jup', 'Rjup', 'R_jupiter', 'Rjupiter'],
          _si.R_jup, namespace=_ns, prefixes=False, doc="Jupiter radius",
          # LaTeX jupiter symbol requires wasysym
-         format={'latex': r'R_{\rm J}', 'unicode': 'R♃'})
+         format={'latex': r'R_{\rm J}', 'unicode': 'R\N{JUPITER}'})
 def_unit(['earthRad', 'R_earth', 'Rearth'], _si.R_earth, namespace=_ns,
          prefixes=False, doc="Earth radius",
          # LaTeX earth symbol requires wasysym
@@ -43,6 +43,8 @@ def_unit(['earthRad', 'R_earth', 'Rearth'], _si.R_earth, namespace=_ns,
 
 def_unit(['lyr', 'lightyear'], (_si.c * si.yr).to(si.m),
          namespace=_ns, prefixes=True, doc="Light year")
+def_unit(['lsec', 'lightsecond'], (_si.c * si.s).to(si.m),
+         namespace=_ns, prefixes=False, doc="Light second")
 
 
 ###########################################################################
@@ -50,11 +52,11 @@ def_unit(['lyr', 'lightyear'], (_si.c * si.yr).to(si.m),
 
 def_unit(['solMass', 'M_sun', 'Msun'], _si.M_sun, namespace=_ns,
          prefixes=False, doc="Solar mass",
-         format={'latex': r'M_{\odot}', 'unicode': 'M⊙'})
+         format={'latex': r'M_{\odot}', 'unicode': 'M\N{SUN}'})
 def_unit(['jupiterMass', 'M_jup', 'Mjup', 'M_jupiter', 'Mjupiter'],
          _si.M_jup, namespace=_ns, prefixes=False, doc="Jupiter mass",
          # LaTeX jupiter symbol requires wasysym
-         format={'latex': r'M_{\rm J}', 'unicode': 'M♃'})
+         format={'latex': r'M_{\rm J}', 'unicode': 'M\N{JUPITER}'})
 def_unit(['earthMass', 'M_earth', 'Mearth'], _si.M_earth, namespace=_ns,
          prefixes=False, doc="Earth mass",
          # LaTeX earth symbol requires wasysym
@@ -79,7 +81,7 @@ def_unit(['Ry', 'rydberg'],
 
 def_unit(['solLum', 'L_sun', 'Lsun'], _si.L_sun, namespace=_ns,
          prefixes=False, doc="Solar luminance",
-         format={'latex': r'L_{\odot}', 'unicode': 'L⊙'})
+         format={'latex': r'L_{\odot}', 'unicode': 'L\N{SUN}'})
 
 
 ###########################################################################
@@ -120,14 +122,6 @@ def_unit(['bin'], namespace=_ns, prefixes=True)
 def_unit(['beam'], namespace=_ns, prefixes=True)
 def_unit(['electron'], doc="Number of electrons", namespace=_ns,
          format={'latex': r'e^{-}', 'unicode': 'e⁻'})
-# This is not formally a unit, but is used in that way in many contexts, and
-# an appropriate equivalency is only possible if it's treated as a unit (see
-# https://arxiv.org/pdf/1308.4150.pdf for more)
-# Also note that h or h100 or h_100 would be a better name, but they either
-# conflict or have numbers in them, which is apparently disallowed
-def_unit(['littleh'], namespace=_ns, prefixes=False,
-         doc="Reduced/\"dimensionless\" Hubble constant",
-         format={'latex': r'h_{100}'})
 
 ###########################################################################
 # CLEANUP
@@ -145,3 +139,22 @@ del si
 from .utils import generate_unit_summary as _generate_unit_summary
 if __doc__ is not None:
     __doc__ += _generate_unit_summary(globals())
+
+
+# -------------------------------------------------------------------------
+
+def __getattr__(attr):
+    if attr == "littleh":
+        import warnings
+        from astropy.cosmology.units import littleh
+        from astropy.utils.exceptions import AstropyDeprecationWarning
+
+        warnings.warn(
+            ("`littleh` is deprecated from module `astropy.units.astrophys` "
+             "since astropy 5.0 and may be removed in a future version. "
+             "Use `astropy.cosmology.units.littleh` instead."),
+            AstropyDeprecationWarning)
+
+        return littleh
+
+    raise AttributeError(f"module {__name__!r} has no attribute {attr!r}.")

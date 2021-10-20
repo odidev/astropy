@@ -126,6 +126,10 @@ def test_distances_scipy():
     with pytest.raises(ValueError):
         Distance()
 
+    # vectors!  regression test for #11949
+    d4 = Distance(z=[0.23, 0.45])  # as of writing, Planck18
+    npt.assert_allclose(d4.z, [0.23, 0.45], rtol=1e-8)
+
 
 def test_distance_change():
 
@@ -136,7 +140,7 @@ def test_distance_change():
     oldx = c1.cartesian.x.value
     assert (oldx - 0.35284083171901953) < 1e-10
 
-    # first make sure distances are immutible
+    # first make sure distances are immutable
     with pytest.raises(AttributeError):
         c1.distance = Distance(2, unit=u.kpc)
 

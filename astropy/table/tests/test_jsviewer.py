@@ -10,6 +10,7 @@ from astropy.table.table import Table
 from astropy import extern
 
 from astropy.utils.compat.optional_deps import HAS_BLEACH, HAS_IPYTHON  # noqa
+from astropy.utils.misc import _NOT_OVERWRITING_MSG_MATCH
 
 EXTERN_DIR = abspath(join(dirname(extern.__file__), 'jquery', 'data'))
 
@@ -104,6 +105,22 @@ def test_write_jsviewer_default(tmpdir):
     )
     with open(tmpfile) as f:
         assert f.read().strip() == ref.strip()
+
+
+def test_write_jsviewer_overwrite(tmpdir):
+    t = Table()
+    t['a'] = [1, 2, 3, 4, 5]
+    t['b'] = ['a', 'b', 'c', 'd', 'e']
+    t['a'].unit = 'm'
+    tmpfile = tmpdir.join('test.html').strpath
+
+    # normal write
+    t.write(tmpfile, format='jsviewer')
+    # errors on overwrite
+    with pytest.raises(OSError, match=_NOT_OVERWRITING_MSG_MATCH):
+        t.write(tmpfile, format='jsviewer')
+    # unless specified
+    t.write(tmpfile, format='jsviewer', overwrite=True)
 
 
 @pytest.mark.parametrize('mixin', [

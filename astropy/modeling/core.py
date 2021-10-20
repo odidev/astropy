@@ -20,7 +20,6 @@ import itertools
 import functools
 import operator
 import types
-import warnings
 
 from collections import defaultdict, deque
 from inspect import signature
@@ -35,7 +34,6 @@ from astropy.units.utils import quantity_asanyarray
 from astropy.utils import (sharedmethod, find_current_module,
                            check_broadcast, IncompatibleShapeError, isiterable)
 from astropy.utils.codegen import make_function_with_signature
-from astropy.utils.exceptions import AstropyDeprecationWarning
 from astropy.nddata.utils import add_array, extract_array
 from .utils import (combine_labels, make_binary_operator_eval,
                     get_inputs_and_params, _BoundingBox, _combine_equivalency_dict,
@@ -115,7 +113,7 @@ class _ModelMeta(abc.ABCMeta):
                 if issubclass(tbase, Model):
                     # Preserve order of definitions
                     param_names = list(tbase._parameters_) + param_names
-        # Remove duplicates (arising from redefintion in subclass).
+        # Remove duplicates (arising from redefinition in subclass).
         param_names = list(dict.fromkeys(param_names))
         if cls._parameters_:
             if hasattr(cls, '_param_names'):
@@ -691,7 +689,7 @@ class Model(metaclass=_ModelMeta):
     input_units_equivalencies = None
 
     # Covariance matrix can be set by fitter if available.
-    # If cov_matrix is availble, then std will set as well
+    # If cov_matrix is available, then std will set as well
     _cov_matrix = None
     _stds = None
 
@@ -712,25 +710,13 @@ class Model(metaclass=_ModelMeta):
                         self.__dict__[parname] = newpar
 
         self._initialize_constraints(kwargs)
+        kwargs = self._initialize_setters(kwargs)
         # Remaining keyword args are either parameter values or invalid
         # Parameter values must be passed in as keyword arguments in order to
         # distinguish them
         self._initialize_parameters(args, kwargs)
         self._initialize_slices()
         self._initialize_unit_support()
-
-        # Raise DeprecationWarning on classes with class attributes
-        # ``inputs`` and ``outputs``.
-        self._inputs_deprecation()
-
-    def _inputs_deprecation(self):
-        if hasattr(self.__class__, 'inputs') and isinstance(self.__class__.inputs, tuple):
-            warnings.warn(
-                f"""Class {self.__class__.__name__} defines class attributes ``inputs``.
-                This has been deprecated in v4.0 and support will be removed in v4.1.
-                Starting with v4.0 classes must define a class attribute ``n_inputs``.
-                Please consult the documentation for details.
-                """, AstropyDeprecationWarning)
 
     def _default_inputs_outputs(self):
         if self.n_inputs == 1 and self.n_outputs == 1:
@@ -749,6 +735,19 @@ class Model(metaclass=_ModelMeta):
                 # ``n_inputs``, ``n_outputs``, ``inputs`` or ``outputs``.
                 self._inputs = ()
                 self._outputs = ()
+
+    def _initialize_setters(self, kwargs):
+        """
+        This exists to inject defaults for settable properties for models
+        originating from `custom_model`.
+        """
+        if hasattr(self, '_settable_properties'):
+            setters = {name: kwargs.pop(name, default)
+                       for name, default in self._settable_properties.items()}
+            for name, value in setters.items():
+                setattr(self, name, value)
+
+        return kwargs
 
     @property
     def inputs(self):
@@ -992,7 +991,7 @@ class Model(metaclass=_ModelMeta):
         that pertains to which model a parameter value pertains to--as
         specified when the model was initialized.
 
-        See the documentation on :ref:`modeling-model-sets`
+        See the documentation on :ref:`astropy:modeling-model-sets`
         for more details.
         """
 
@@ -1199,7 +1198,7 @@ class Model(metaclass=_ModelMeta):
         this property just raises `NotImplementedError` by default (but may be
         assigned a custom value by a user).  ``bounding_box`` can be set
         manually to an array-like object of shape ``(model.n_inputs, 2)``. For
-        further usage, see :ref:`bounding-boxes`
+        further usage, see :ref:`astropy:bounding-boxes`
 
         The limits are ordered according to the `numpy` indexing
         convention, and are the reverse of the model input order,
@@ -1531,7 +1530,7 @@ class Model(metaclass=_ModelMeta):
 
         Examples
         --------
-        :ref:`bounding-boxes`
+        :ref:`astropy:bounding-boxes`
         """
 
         try:
@@ -2519,7 +2518,7 @@ class CompoundModel(Model):
     to combine models is through the model operators.
     '''
 
-    def __init__(self, op, left, right, name=None, inverse=None):
+    def __init__(self, op, left, right, name=None):
         self.__dict__['_param_names'] = None
         self._n_submodels = None
         self.op = op
@@ -2532,14 +2531,6 @@ class CompoundModel(Model):
         self._parameters = None
         self._parameters_ = None
         self._param_metrics = None
-
-        if inverse:
-            warnings.warn(
-                "The 'inverse' argument is deprecated.  Instead, set the inverse "
-                "property after CompoundModel is initialized.",
-                AstropyDeprecationWarning
-            )
-            self.inverse = inverse
 
         if op != 'fix_inputs' and len(left) != len(right):
             raise ValueError(
@@ -2653,7 +2644,7 @@ class CompoundModel(Model):
     def _get_right_inputs_from_args(self, args):
         op = self.op
         if op == '&':
-            # Args expected to look lik (*left inputs, *right inputs, *left params, *right params)
+            # Args expected to look like (*left inputs, *right inputs, *left params, *right params)
             return args[self.left.n_inputs: self.left.n_inputs + self.right.n_inputs]
         elif op == '|' or  op == 'fix_inputs':
             return None
@@ -2663,7 +2654,7 @@ class CompoundModel(Model):
     def _get_left_params_from_args(self, args):
         op = self.op
         if op == '&':
-            # Args expected to look lik (*left inputs, *right inputs, *left params, *right params)
+            # Args expected to look like (*left inputs, *right inputs, *left params, *right params)
             n_inputs = self.left.n_inputs + self.right.n_inputs
             return args[n_inputs: n_inputs + self.n_left_params]
         else:
@@ -2674,7 +2665,7 @@ class CompoundModel(Model):
         if op == 'fix_inputs':
             return None
         if op == '&':
-            # Args expected to look lik (*left inputs, *right inputs, *left params, *right params)
+            # Args expected to look like (*left inputs, *right inputs, *left params, *right params)
             return args[self.left.n_inputs + self.right.n_inputs + self.n_left_params:]
         else:
             return args[self.left.n_inputs + self.n_left_params:]
@@ -2784,24 +2775,6 @@ class CompoundModel(Model):
             else:
                 newnames.append(item)
         return tuple(newnames)
-
-    def both_inverses_exist(self):
-        '''
-        if both members of this compound model have inverses return True
-        '''
-        warnings.warn(
-            "CompoundModel.both_inverses_exist is deprecated. "
-            "Use has_inverse instead.",
-            AstropyDeprecationWarning
-        )
-
-        try:
-            linv = self.left.inverse
-            rinv = self.right.inverse
-        except NotImplementedError:
-            return False
-
-        return True
 
     def __call__(self, *args, **kw):
         # Turn any keyword arguments into positional arguments.
@@ -3341,11 +3314,13 @@ class CompoundModel(Model):
         This also presumes that the list of input indices to remove (i.e.,
         input_ind has already been put in reverse sorted order).
         """
-        bounding_box = list(self.left.bounding_box)
+        bounding_box = list(self.left.bounding_box)[::-1]
         for ind in input_ind:
             del bounding_box[ind]
         if self.n_inputs == 1:
             bounding_box = bounding_box[0]
+        else:
+            bounding_box = bounding_box[::-1]
         self.bounding_box = bounding_box
 
     @property
@@ -3397,7 +3372,7 @@ class CompoundModel(Model):
 
         Examples
         --------
-        :ref:`bounding-boxes`
+        :ref:`astropy:bounding-boxes`
         """
 
         try:
@@ -3435,7 +3410,7 @@ class CompoundModel(Model):
                                  'number of dimensions.')
 
         if bbox is not None:
-            # Assures position is at center pixel, important when usin
+            # Assures position is at center pixel, important when using
             # add_array.
             pd = np.array([(np.mean(bb), np.ceil((bb[1] - bb[0]) / 2))
                            for bb in bbox]).astype(int).T
@@ -3616,7 +3591,7 @@ def fix_inputs(modelinstance, values):
     return CompoundModel('fix_inputs', modelinstance, values)
 
 
-def custom_model(*args, fit_deriv=None, **kwargs):
+def custom_model(*args, fit_deriv=None):
     """
     Create a model from a user defined function. The inputs and parameters of
     the model will be inferred from the arguments of the function.
@@ -3624,11 +3599,20 @@ def custom_model(*args, fit_deriv=None, **kwargs):
     This can be used either as a function or as a decorator.  See below for
     examples of both usages.
 
+    The model is separable only if there is a single input.
+
     .. note::
 
         All model parameters have to be defined as keyword arguments with
         default values in the model function.  Use `None` as a default argument
         value if you do not want to have a default value for that parameter.
+
+        The standard settable model properties can be configured by default
+        using keyword arguments matching the name of the property; however,
+        these values are not set as model "parameters". Moreover, users
+        cannot use keyword arguments matching non-settable model properties,
+        with the exception of ``n_outputs`` which should be set to the number of
+        outputs of your function.
 
     Parameters
     ----------
@@ -3685,13 +3669,6 @@ def custom_model(*args, fit_deriv=None, **kwargs):
         0.3333333333333333
     """
 
-    if kwargs:
-        warnings.warn(
-            "Function received unexpected arguments ({}) these "
-            "are ignored but will raise an Exception in the "
-            "future.".format(list(kwargs)),
-            AstropyDeprecationWarning)
-
     if len(args) == 1 and callable(args[0]):
         return _custom_model_wrapper(args[0], fit_deriv=fit_deriv)
     elif not args:
@@ -3702,6 +3679,50 @@ def custom_model(*args, fit_deriv=None, **kwargs):
             "function to be turned into a model.  When used as a decorator "
             "it should be passed keyword arguments only (if "
             "any).".format(__name__))
+
+
+def _custom_model_inputs(func):
+    """
+    Processes the inputs to the `custom_model`'s function into the appropriate
+    categories.
+
+    Parameters
+    ----------
+    func : callable
+
+    Returns
+    -------
+    inputs : list
+        list of evaluation inputs
+    special_params : dict
+        dictionary of model properties which require special treatment
+    settable_params : dict
+        dictionary of defaults for settable model properties
+    params : dict
+        dictionary of model parameters set by `custom_model`'s function
+    """
+    inputs, parameters = get_inputs_and_params(func)
+
+    special = ['n_outputs']
+    settable = [attr for attr, value in vars(Model).items()
+                if isinstance(value, property) and value.fset is not None]
+    properties = [attr for attr, value in vars(Model).items()
+                  if isinstance(value, property) and value.fset is None and attr not in special]
+
+    special_params = {}
+    settable_params = {}
+    params = {}
+    for param in parameters:
+        if param.name in special:
+            special_params[param.name] = param.default
+        elif param.name in settable:
+            settable_params[param.name] = param.default
+        elif param.name in properties:
+            raise ValueError(f"Parameter '{param.name}' cannot be a model property: {properties}.")
+        else:
+            params[param.name] = param.default
+
+    return inputs, special_params, settable_params, params
 
 
 def _custom_model_wrapper(func, fit_deriv=None):
@@ -3727,21 +3748,15 @@ def _custom_model_wrapper(func, fit_deriv=None):
 
     model_name = func.__name__
 
-    inputs, params = get_inputs_and_params(func)
+    inputs, special_params, settable_params, params = _custom_model_inputs(func)
 
     if (fit_deriv is not None and
             len(fit_deriv.__defaults__) != len(params)):
         raise ModelDefinitionError("derivative function should accept "
                                    "same number of parameters as func.")
 
-    # TODO: Maybe have a clever scheme for default output name?
-    if inputs:
-        output_names = (inputs[0].name,)
-    else:
-        output_names = ('x',)
-
-    params = {param.name: Parameter(param.name, default=param.default)
-              for param in params}
+    params = {param: Parameter(param, default=default)
+              for param, default in params.items()}
 
     mod = find_current_module(2)
     if mod:
@@ -3753,9 +3768,9 @@ def _custom_model_wrapper(func, fit_deriv=None):
         '__module__': str(modname),
         '__doc__': func.__doc__,
         'n_inputs': len(inputs),
-        # tuple(x.name for x in inputs)),
-        'n_outputs': len(output_names),
-        'evaluate': staticmethod(func)
+        'n_outputs': special_params.pop('n_outputs', 1),
+        'evaluate': staticmethod(func),
+        '_settable_properties': settable_params
     }
 
     if fit_deriv is not None:
@@ -3763,7 +3778,9 @@ def _custom_model_wrapper(func, fit_deriv=None):
 
     members.update(params)
 
-    return type(model_name, (FittableModel,), members)
+    cls = type(model_name, (FittableModel,), members)
+    cls._separable = True if (len(inputs) == 1) else False
+    return cls
 
 
 def render_model(model, arr=None, coords=None):
@@ -3792,7 +3809,7 @@ def render_model(model, arr=None, coords=None):
 
     Examples
     --------
-    :ref:`bounding-boxes`
+    :ref:`astropy:bounding-boxes`
     """
 
     bbox = model.bounding_box
@@ -4068,7 +4085,7 @@ def _validate_input_shapes(inputs, argnames, n_models, model_set_axis,
 def remove_axes_from_shape(shape, axis):
     """
     Given a shape tuple as the first input, construct a new one by  removing
-    that particular axis from the shape and all preceeding axes. Negative axis
+    that particular axis from the shape and all preceding axes. Negative axis
     numbers are permittted, where the axis is relative to the last axis.
     """
     if len(shape) == 0:

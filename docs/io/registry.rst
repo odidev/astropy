@@ -18,8 +18,8 @@ Introduction
 ============
 
 The I/O registry is a submodule used to define the readers/writers available
-for the :class:`~astropy.table.Table` and
-:class:`~astropy.nddata.NDData` classes.
+for the :class:`~astropy.table.Table`, :class:`~astropy.nddata.NDData`,
+and :class:`~astropy.cosmology.Cosmology` classes.
 
 Using `astropy.io.registry`
 ===========================
@@ -106,6 +106,7 @@ above, we can write a custom writer::
 
    def my_table_writer(table, filename, overwrite=False):
        ...  # Write the table out to a file
+       return ...  # generally None, but other values are not forbidden.
 
 Writer functions should take a dataset object (either an instance of the
 :class:`~astropy.table.Table` or :class:`~astropy.nddata.NDData`

@@ -3,17 +3,17 @@
 """
 This module tests some of the methods related to the ``ECSV``
 reader/writer.
-
-Requires `pyyaml <https://pyyaml.org/>`_ to be installed.
 """
 from astropy.table.column import MaskedColumn
 import os
 import copy
 import sys
 from io import StringIO
+from contextlib import nullcontext
 
 import pytest
 import numpy as np
+import yaml
 
 from astropy.table import Table, Column, QTable, NdarrayMixin
 from astropy.table.table_helpers import simple_table
@@ -24,16 +24,13 @@ from astropy.time import Time, TimeDelta
 from astropy.units import allclose as quantity_allclose
 from astropy.units import QuantityInfo
 
-from astropy.utils.exceptions import AstropyUserWarning, AstropyWarning
+from astropy.utils.exceptions import AstropyUserWarning
 
 from astropy.io.ascii.ecsv import DELIMITERS
 from astropy.io import ascii
 from astropy import units as u
-from astropy.utils.compat.optional_deps import HAS_YAML  # noqa
 
 from .common import TEST_DIR
-
-pytestmark = pytest.mark.skipif(not HAS_YAML, reason='YAML required')
 
 DTYPES = ['bool', 'int8', 'int16', 'int32', 'int64', 'uint8', 'uint16', 'uint32',
           'uint64', 'float16', 'float32', 'float64', 'float128',
@@ -269,12 +266,13 @@ def assert_objects_equal(obj1, obj2, attrs, compare_class=True):
     # For no attrs that means we just compare directly.
     if not attrs:
         if isinstance(obj1, np.ndarray) and obj1.dtype.kind == 'f':
-            assert quantity_allclose(obj1, obj2, rtol=1e-10)
+            assert quantity_allclose(obj1, obj2, rtol=1e-15)
         else:
             assert np.all(obj1 == obj2)
 
 
-# TODO: unify with the very similar tests in fits/tests/test_connect.py.
+# TODO: unify with the very similar tests in fits/tests/test_connect.py
+# and misc/tests/test_hd5f.py.
 el = EarthLocation(x=[1, 2] * u.km, y=[3, 4] * u.km, z=[5, 6] * u.km)
 sr = SphericalRepresentation(
     [0, 1]*u.deg, [2, 3]*u.deg, 1*u.kpc)
@@ -285,8 +283,17 @@ sd = SphericalCosLatDifferential(
 srd = SphericalRepresentation(sr, differentials=sd)
 sc = SkyCoord([1, 2], [3, 4], unit='deg,deg', frame='fk4',
               obstime='J1990.5')
-scc = sc.copy()
-scc.representation_type = 'cartesian'
+scd = SkyCoord([1, 2], [3, 4], [5, 6], unit='deg,deg,m', frame='fk4',
+               obstime=['J1990.5'] * 2)
+scdc = scd.copy()
+scdc.representation_type = 'cartesian'
+scpm = SkyCoord([1, 2], [3, 4], [5, 6], unit='deg,deg,pc',
+                pm_ra_cosdec=[7, 8]*u.mas/u.yr, pm_dec=[9, 10]*u.mas/u.yr)
+scpmrv = SkyCoord([1, 2], [3, 4], [5, 6], unit='deg,deg,pc',
+                  pm_ra_cosdec=[7, 8]*u.mas/u.yr, pm_dec=[9, 10]*u.mas/u.yr,
+                  radial_velocity=[11, 12]*u.km/u.s)
+scrv = SkyCoord([1, 2], [3, 4], [5, 6], unit='deg,deg,pc',
+                radial_velocity=[11, 12]*u.km/u.s)
 tm = Time([51000.5, 51001.5], format='mjd', scale='tai', precision=5, location=el[0])
 tm2 = Time(tm, format='iso')
 tm3 = Time(tm, location=el)
@@ -302,9 +309,11 @@ mixin_cols = {
     'tm3': tm3,
     'dt': TimeDelta([1, 2] * u.day),
     'sc': sc,
-    'scc': scc,
-    'scd': SkyCoord([1, 2], [3, 4], [5, 6], unit='deg,deg,m', frame='fk4',
-                    obstime=['J1990.5'] * 2),
+    'scd': scd,
+    'scdc': scdc,
+    'scpm': scpm,
+    'scpmrv': scpmrv,
+    'scrv': scrv,
     'x': [1, 2] * u.m,
     'qdb': [10, 20] * u.dB(u.mW),
     'qdex': [4.5, 5.5] * u.dex(u.cm / u.s**2),
@@ -331,8 +340,14 @@ compare_attrs = {
     'tm3': time_attrs,
     'dt': ['shape', 'value', 'format', 'scale'],
     'sc': ['ra', 'dec', 'representation_type', 'frame.name'],
-    'scc': ['x', 'y', 'z', 'representation_type', 'frame.name'],
     'scd': ['ra', 'dec', 'distance', 'representation_type', 'frame.name'],
+    'scdc': ['x', 'y', 'z', 'representation_type', 'frame.name'],
+    'scpm': ['ra', 'dec', 'distance', 'pm_ra_cosdec', 'pm_dec',
+             'representation_type', 'frame.name'],
+    'scpmrv': ['ra', 'dec', 'distance', 'pm_ra_cosdec', 'pm_dec',
+               'radial_velocity', 'representation_type', 'frame.name'],
+    'scrv': ['ra', 'dec', 'distance', 'radial_velocity', 'representation_type',
+             'frame.name'],
     'x': ['value', 'unit'],
     'qdb': ['value', 'unit'],
     'qdex': ['value', 'unit'],
@@ -351,7 +366,6 @@ compare_attrs = {
 }
 
 
-@pytest.mark.skipif('not HAS_YAML')
 def test_ecsv_mixins_ascii_read_class():
     """Ensure that ascii.read(ecsv_file) returns the correct class
     (QTable if any Quantity subclasses, Table otherwise).
@@ -373,7 +387,6 @@ def test_ecsv_mixins_ascii_read_class():
     assert type(t2) is QTable
 
 
-@pytest.mark.skipif('not HAS_YAML')
 def test_ecsv_mixins_qtable_to_table():
     """Test writing as QTable and reading as Table.  Ensure correct classes
     come out.
@@ -404,7 +417,6 @@ def test_ecsv_mixins_qtable_to_table():
         assert_objects_equal(col, col2, attrs, compare_class)
 
 
-@pytest.mark.skipif('not HAS_YAML')
 @pytest.mark.parametrize('table_cls', (Table, QTable))
 def test_ecsv_mixins_as_one(table_cls):
     """Test write/read all cols at once and validate intermediate column names"""
@@ -422,9 +434,17 @@ def test_ecsv_mixins_as_one(table_cls):
                         'qdex',
                         'qmag',
                         'sc.ra', 'sc.dec',
-                        'scc.x', 'scc.y', 'scc.z',
                         'scd.ra', 'scd.dec', 'scd.distance',
                         'scd.obstime',
+                        'scdc.x', 'scdc.y', 'scdc.z',
+                        'scdc.obstime',
+                        'scpm.ra', 'scpm.dec', 'scpm.distance',
+                        'scpm.pm_ra_cosdec', 'scpm.pm_dec',
+                        'scpmrv.ra', 'scpmrv.dec', 'scpmrv.distance',
+                        'scpmrv.pm_ra_cosdec', 'scpmrv.pm_dec',
+                        'scpmrv.radial_velocity',
+                        'scrv.ra', 'scrv.dec', 'scrv.distance',
+                        'scrv.radial_velocity',
                         'sd.d_lon_coslat', 'sd.d_lat', 'sd.d_distance',
                         'sr.lon', 'sr.lat', 'sr.distance',
                         'srd.lon', 'srd.lat', 'srd.distance',
@@ -453,7 +473,7 @@ def test_ecsv_mixins_as_one(table_cls):
 def make_multidim(col, ndim):
     """Take a col with length=2 and make it N-d by repeating elements.
 
-    For the special case of ndim==1 just return the orignal.
+    For the special case of ndim==1 just return the original.
 
     The output has shape [3] * ndim. By using 3 we can be sure that repeating
     the two input elements gives an output that is sufficiently unique for
@@ -466,7 +486,6 @@ def make_multidim(col, ndim):
     return col
 
 
-@pytest.mark.skipif('not HAS_YAML')
 @pytest.mark.parametrize('name_col', list(mixin_cols.items()))
 @pytest.mark.parametrize('table_cls', (Table, QTable))
 @pytest.mark.parametrize('ndim', (1, 2, 3))
@@ -495,23 +514,6 @@ def test_ecsv_mixins_per_column(table_cls, name_col, ndim):
     if name.startswith('tm'):
         assert t2[name]._time.jd1.__class__ is np.ndarray
         assert t2[name]._time.jd2.__class__ is np.ndarray
-
-
-def test_ecsv_but_no_yaml_warning(monkeypatch):
-    """
-    Test that trying to read an ECSV without PyYAML installed when guessing
-    emits a warning, but reading with guess=False gives an exception.
-    """
-    monkeypatch.setitem(sys.modules, 'yaml', None)
-
-    with pytest.warns(AstropyWarning, match=r'file looks like ECSV format but '
-                      'PyYAML is not installed') as w:
-        ascii.read(SIMPLE_LINES)
-    assert len(w) == 1
-
-    with pytest.raises(ascii.InconsistentTableError, match='unable to parse yaml'), \
-            pytest.warns(AstropyWarning, match=r'PyYAML is not installed'):
-        ascii.read(SIMPLE_LINES, format='ecsv')
 
 
 def test_round_trip_masked_table_default(tmpdir):
@@ -547,7 +549,6 @@ def test_round_trip_masked_table_default(tmpdir):
         assert not np.all(t2[name] == t[name])  # Expected diff
 
 
-@pytest.mark.skipif('not HAS_YAML')
 def test_round_trip_masked_table_serialize_mask(tmpdir):
     """Same as prev but set the serialize_method to 'data_mask' so mask is written out"""
     filename = str(tmpdir.join('test.ecsv'))
@@ -574,11 +575,9 @@ def test_round_trip_masked_table_serialize_mask(tmpdir):
         assert np.all(t2[name] == t[name])
 
 
-@pytest.mark.skipif('not HAS_YAML')
 @pytest.mark.parametrize('table_cls', (Table, QTable))
 def test_ecsv_round_trip_user_defined_unit(table_cls, tmpdir):
     """Ensure that we can read-back enabled user-defined units."""
-    from astropy.utils.compat.context import nullcontext
 
     # Test adapted from #8897, where it was noted that this works
     # but was not tested.
@@ -796,7 +795,6 @@ def test_full_repr_roundtrip():
 
 # First here is some helper code used to make the expected outputs code.
 def _get_ecsv_header_dict(text):
-    import yaml
     lines = [line.strip() for line in text.splitlines()]
     lines = [line[2:] for line in lines if line.startswith('#')]
     lines = lines[2:]  # Get rid of the header

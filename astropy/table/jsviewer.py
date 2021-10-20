@@ -4,8 +4,8 @@ from os.path import abspath, dirname, join
 
 from .table import Table
 
-from astropy.io import registry as io_registry
-from astropy import config as _config
+import astropy.io.registry as io_registry
+import astropy.config as _config
 from astropy import extern
 
 
@@ -24,7 +24,7 @@ class Conf(_config.ConfigNamespace):
 
     css_urls = _config.ConfigItem(
         ['https://cdn.datatables.net/1.10.12/css/jquery.dataTables.css'],
-        'The URLs to the css file(s) to include.', cfgtype='list')
+        'The URLs to the css file(s) to include.', cfgtype='string_list')
 
 
 conf = Conf()
@@ -171,7 +171,7 @@ class JSViewer:
 
 def write_table_jsviewer(table, filename, table_id=None, max_lines=5000,
                          table_class="display compact", jskwargs=None,
-                         css=DEFAULT_CSS, htmldict=None):
+                         css=DEFAULT_CSS, htmldict=None, overwrite=False):
     if table_id is None:
         table_id = f'table{id(table)}'
 
@@ -193,7 +193,8 @@ def write_table_jsviewer(table, filename, table_id=None, max_lines=5000,
 
     if max_lines < len(table):
         table = table[:max_lines]
-    table.write(filename, format='html', htmldict=html_options)
+    table.write(filename, format='html', htmldict=html_options,
+                overwrite=overwrite)
 
 
 io_registry.register_writer('jsviewer', Table, write_table_jsviewer)

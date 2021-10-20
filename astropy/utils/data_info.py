@@ -116,9 +116,9 @@ def data_info_factory(names, funcs):
     >>> mystats = data_info_factory(names=['min', 'median', 'max'],
     ...                             funcs=[np.min, np.median, np.max])
     >>> c.info(option=mystats)
-    min = 1.0
+    min = 1
     median = 2.5
-    max = 4.0
+    max = 4
     n_bad = 0
     length = 4
 
@@ -145,7 +145,10 @@ def data_info_factory(names, funcs):
             except Exception:
                 outs.append('--')
             else:
-                outs.append(str(out))
+                try:
+                    outs.append(f'{out:g}')
+                except (TypeError, ValueError):
+                    outs.append(str(out))
 
         return OrderedDict(zip(names, outs))
     return func
@@ -355,6 +358,9 @@ reference with ``c = col[3:5]`` followed by ``c.info``.""")
                 # _attrs, so speed matters up by not accessing defaults.
                 # Doing this before difference in for loop helps speed.
                 attr_names = attr_names & set(value._attrs)  # NOT in-place!
+            else:
+                # For different classes, copy over the attributes in common.
+                attr_names = attr_names & (value.attr_names - value._attrs_no_copy)
 
             for attr in attr_names - info.attrs_from_parent - info._attrs_no_copy:
                 info._attrs[attr] = deepcopy(getattr(value, attr))

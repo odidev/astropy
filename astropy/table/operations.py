@@ -18,6 +18,7 @@ from collections.abc import Mapping, Sequence
 import numpy as np
 
 from astropy.utils import metadata
+from astropy.utils.masked import Masked
 from .table import Table, QTable, Row, Column, MaskedColumn
 from astropy.units import Quantity
 
@@ -63,8 +64,8 @@ def _get_list_of_tables(tables):
         else:
             try:
                 tables[ii] = Table([val])
-            except (ValueError, TypeError):
-                raise TypeError(f'cannot convert {val} to table column.')
+            except (ValueError, TypeError) as err:
+                raise TypeError(f'Cannot convert {val} to table column.') from err
 
     return tables
 
@@ -159,8 +160,8 @@ def join_skycoord(distance, distance_func='search_around_sky'):
         import astropy.coordinates as coords
         try:
             distance_func = getattr(coords, distance_func)
-        except AttributeError:
-            raise ValueError('distance_func must be a function in astropy.coordinates')
+        except AttributeError as err:
+            raise ValueError('distance_func must be a function in astropy.coordinates') from err
     else:
         from inspect import isfunction
         if not isfunction(distance_func):
@@ -190,7 +191,7 @@ def join_skycoord(distance, distance_func='search_around_sky'):
             elif ids2[idx2] > 0:
                 ids1[idx1] = ids2[idx2]
             else:
-                # Not yet seen so set identifer for col1 and col2
+                # Not yet seen so set identifier for col1 and col2
                 ids1[idx1] = id_
                 ids2[idx2] = id_
                 id_ += 1
@@ -318,7 +319,7 @@ def join_distance(distance, kdtree_args=None, query_args=None):
                 elif ids2[idx2] > 0:
                     ids1[idx1] = ids2[idx2]
                 else:
-                    # Not yet seen so set identifer for col1 and col2
+                    # Not yet seen so set identifier for col1 and col2
                     ids1[idx1] = id_
                     ids2[idx2] = id_
                     id_ += 1
@@ -335,7 +336,8 @@ def join_distance(distance, kdtree_args=None, query_args=None):
     return join_func
 
 
-def join(left, right, keys=None, join_type='inner',
+def join(left, right, keys=None, join_type='inner', *,
+         keys_left=None, keys_right=None,
          uniq_col_name='{col_name}_{table_name}',
          table_names=['1', '2'], metadata_conflicts='warn',
          join_funcs=None):
@@ -353,6 +355,12 @@ def join(left, right, keys=None, join_type='inner',
         Default is to use all columns which are common to both tables.
     join_type : str
         Join type ('inner' | 'outer' | 'left' | 'right' | 'cartesian'), default is 'inner'
+    keys_left : str or list of str or list of column-like, optional
+        Left column(s) used to match rows instead of ``keys`` arg. This can be
+        be a single left table column name or list of column names, or a list of
+        column-like values with the same lengths as the left table.
+    keys_right : str or list of str or list of column-like, optional
+        Same as ``keys_left``, but for the right side of the join.
     uniq_col_name : str or None
         String generate a unique output column name in case of a conflict.
         The default is '{col_name}_{table_name}'.
@@ -383,7 +391,8 @@ def join(left, right, keys=None, join_type='inner',
     col_name_map = OrderedDict()
     out = _join(left, right, keys, join_type,
                 uniq_col_name, table_names, col_name_map, metadata_conflicts,
-                join_funcs)
+                join_funcs,
+                keys_left=keys_left, keys_right=keys_right)
 
     # Merge the column and table meta data. Table subclasses might override
     # these methods for custom merge behavior.
@@ -683,6 +692,10 @@ def hstack(tables, join_type='outer',
     stacked_table : `~astropy.table.Table` object
         New table containing the stacked data from the input tables.
 
+    See Also
+    --------
+    Table.add_columns, Table.replace_column, Table.update
+
     Examples
     --------
     To stack two tables horizontally (along columns) do::
@@ -930,7 +943,7 @@ def get_descrs(arrays, col_name_map):
             # Beautify the error message when we are trying to merge columns with incompatible
             # types by including the name of the columns that originated the error.
             raise TableMergeError("The '{}' columns have incompatible types: {}"
-                                  .format(names[0], tme._incompat_types))
+                                  .format(names[0], tme._incompat_types)) from tme
 
         # Make sure all input shapes are the same
         uniq_shapes = set(col.shape[1:] for col in in_cols)
@@ -955,7 +968,7 @@ def common_dtype(cols):
     except metadata.MergeConflictError as err:
         tme = TableMergeError(f'Columns have incompatible types {err._incompat_types}')
         tme._incompat_types = err._incompat_types
-        raise tme
+        raise tme from err
 
 
 def _get_join_sort_idxs(keys, left, right):
@@ -1027,10 +1040,12 @@ def _apply_join_funcs(left, right, keys, join_funcs):
     right = right.copy(copy_data=False)
     for key, join_func in join_funcs.items():
         ids1, ids2 = join_func(left[key], right[key])
-        for ii in itertools.count(1):
-            id_key = key + '_' * ii + 'id'
-            if id_key not in left.columns and id_key not in right.columns:
-                break
+        # Define a unique id_key name, and keep adding underscores until we have
+        # a name not yet present.
+        id_key = key + '_id'
+        while id_key in left.columns or id_key in right.columns:
+            id_key = id_key[:-2] + '_id'
+
         keys = tuple(id_key if orig_key == key else orig_key for orig_key in keys)
         left.add_column(ids1, index=0, name=id_key)  # [id_key] = ids1
         right.add_column(ids2, index=0, name=id_key)  # [id_key] = ids2
@@ -1042,7 +1057,8 @@ def _join(left, right, keys=None, join_type='inner',
           uniq_col_name='{col_name}_{table_name}',
           table_names=['1', '2'],
           col_name_map=None, metadata_conflicts='warn',
-          join_funcs=None):
+          join_funcs=None,
+          keys_left=None, keys_right=None):
     """
     Perform a join of the left and right Tables on specified keys.
 
@@ -1107,12 +1123,23 @@ def _join(left, right, keys=None, join_type='inner',
         right[cartesian_index_name] = np.uint8(0)
         keys = (cartesian_index_name, )
 
-    # If we have a single key, put it in a tuple
+    # Handle the case of join key columns that are different between left and
+    # right via keys_left/keys_right args. This is done by saving the original
+    # input tables and making new left and right tables that contain only the
+    # key cols but with common column names ['0', '1', etc]. This sets `keys` to
+    # those fake key names in the left and right tables
+    if keys_left is not None or keys_right is not None:
+        left_orig = left
+        right_orig = right
+        left, right, keys = _join_keys_left_right(
+            left, right, keys, keys_left, keys_right, join_funcs)
+
     if keys is None:
         keys = tuple(name for name in left.colnames if name in right.colnames)
         if len(keys) == 0:
             raise TableMergeError('No keys in common between left and right tables')
     elif isinstance(keys, str):
+        # If we have a single key, put it in a tuple
         keys = (keys,)
 
     # Check the key columns
@@ -1136,14 +1163,23 @@ def _join(left, right, keys=None, join_type='inner',
     if len_left == 0 or len_right == 0:
         raise ValueError('input tables for join must both have at least one row')
 
-    # Joined array dtype as a list of descr (name, type_str, shape) tuples
-    col_name_map = get_col_name_map([left, right], keys, uniq_col_name, table_names)
-    out_descrs = get_descrs([left, right], col_name_map)
-
     try:
         idxs, idx_sort = _get_join_sort_idxs(keys, left, right)
     except NotImplementedError:
         raise TypeError('one or more key columns are not sortable')
+
+    # Now that we have idxs and idx_sort, revert to the original table args to
+    # carry on with making the output joined table. `keys` is set to to an empty
+    # list so that all original left and right columns are included in the
+    # output table.
+    if keys_left is not None or keys_right is not None:
+        keys = []
+        left = left_orig
+        right = right_orig
+
+    # Joined array dtype as a list of descr (name, type_str, shape) tuples
+    col_name_map = get_col_name_map([left, right], keys, uniq_col_name, table_names)
+    out_descrs = get_descrs([left, right], col_name_map)
 
     # Main inner loop in Cython to compute the cartesian product
     # indices for the given join type
@@ -1190,6 +1226,9 @@ def _join(left, right, keys=None, join_type='inner',
             if isinstance(col, Column) and not isinstance(col, MaskedColumn):
                 col = out.MaskedColumn(col, copy=False)
 
+            if isinstance(col, Quantity) and not isinstance(col, Masked):
+                col = Masked(col, copy=False)
+
             # array_mask is 1-d corresponding to length of output column.  We need
             # make it have the correct shape for broadcasting, i.e. (length, 1, 1, ..).
             # Mixin columns might not have ndim attribute so use len(col.shape).
@@ -1200,11 +1239,11 @@ def _join(left, right, keys=None, join_type='inner',
 
             try:
                 col[array_mask] = col.info.mask_val
-            except Exception:  # Not clear how different classes will fail here
+            except Exception as err:  # Not clear how different classes will fail here
                 raise NotImplementedError(
                     "join requires masking column '{}' but column"
                     " type {} does not support masking"
-                    .format(out_name, col.__class__.__name__))
+                    .format(out_name, col.__class__.__name__)) from err
 
         # Set the output table column to the new joined column
         out[out_name] = col
@@ -1214,6 +1253,58 @@ def _join(left, right, keys=None, join_type='inner',
         _col_name_map.update(col_name_map)
 
     return out
+
+
+def _join_keys_left_right(left, right, keys, keys_left, keys_right, join_funcs):
+    """Do processing to handle keys_left / keys_right args for join.
+
+    This takes the keys_left/right inputs and turns them into a list of left/right
+    columns corresponding to those inputs (which can be column names or column
+    data values). It also generates the list of fake key column names (strings
+    of "1", "2", etc.) that correspond to the input keys.
+    """
+    def _keys_to_cols(keys, table, label):
+        # Process input `keys`, which is a str or list of str column names in
+        # `table` or a list of column-like objects. The `label` is just for
+        # error reporting.
+        if isinstance(keys, str):
+            keys = [keys]
+        cols = []
+        for key in keys:
+            if isinstance(key, str):
+                try:
+                    cols.append(table[key])
+                except KeyError:
+                    raise ValueError(f'{label} table does not have key column {key!r}')
+            else:
+                if len(key) != len(table):
+                    raise ValueError(f'{label} table has different length from key {key}')
+                cols.append(key)
+        return cols
+
+    if join_funcs is not None:
+        raise ValueError('cannot supply join_funcs arg and keys_left / keys_right')
+
+    if keys_left is None or keys_right is None:
+        raise ValueError('keys_left and keys_right must both be provided')
+
+    if keys is not None:
+        raise ValueError('keys arg must be None if keys_left and keys_right are supplied')
+
+    cols_left = _keys_to_cols(keys_left, left, 'left')
+    cols_right = _keys_to_cols(keys_right, right, 'right')
+
+    if len(cols_left) != len(cols_right):
+        raise ValueError('keys_left and keys_right args must have same length')
+
+    # Make two new temp tables for the join with only the join columns and
+    # key columns in common.
+    keys = [f'{ii}' for ii in range(len(cols_left))]
+
+    left = left.__class__(cols_left, names=keys, copy=False)
+    right = right.__class__(cols_right, names=keys, copy=False)
+
+    return left, right, keys
 
 
 def _check_join_type(join_type, func_name):
@@ -1307,7 +1398,7 @@ def _vstack(arrays, join_type='outer', col_name_map=None, metadata_conflicts='wa
             # Beautify the error message when we are trying to merge columns with incompatible
             # types by including the name of the columns that originated the error.
             raise TableMergeError("The '{}' columns have incompatible types: {}"
-                                  .format(out_name, err._incompat_types))
+                                  .format(out_name, err._incompat_types)) from err
 
         idx0 = 0
         for name, array in zip(in_names, arrays):
@@ -1320,13 +1411,16 @@ def _vstack(arrays, join_type='outer', col_name_map=None, metadata_conflicts='wa
                 if isinstance(col, Column) and not isinstance(col, MaskedColumn):
                     col = out.MaskedColumn(col, copy=False)
 
+                if isinstance(col, Quantity) and not isinstance(col, Masked):
+                    col = Masked(col, copy=False)
+
                 try:
                     col[idx0:idx1] = col.info.mask_val
-                except Exception:
+                except Exception as err:
                     raise NotImplementedError(
                         "vstack requires masking column '{}' but column"
                         " type {} does not support masking"
-                        .format(out_name, col.__class__.__name__))
+                        .format(out_name, col.__class__.__name__)) from err
             idx0 = idx1
 
         out[out_name] = col
@@ -1420,13 +1514,16 @@ def _hstack(arrays, join_type='outer', uniq_col_name='{col_name}_{table_name}',
                 if isinstance(col, Column) and not isinstance(col, MaskedColumn):
                     col = out.MaskedColumn(col, copy=False)
 
+                if isinstance(col, Quantity) and not isinstance(col, Masked):
+                    col = Masked(col, copy=False)
+
                 try:
                     col[arr_len:] = col.info.mask_val
-                except Exception:
+                except Exception as err:
                     raise NotImplementedError(
                         "hstack requires masking column '{}' but column"
                         " type {} does not support masking"
-                        .format(out_name, col.__class__.__name__))
+                        .format(out_name, col.__class__.__name__)) from err
             else:
                 col = array[name][:n_rows]
 

@@ -1,6 +1,4 @@
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
-import os
-
 import matplotlib.lines
 import matplotlib.pyplot as plt
 import pytest
@@ -14,6 +12,7 @@ from astropy.coordinates import SkyCoord
 from astropy.io import fits
 from astropy.tests.image_tests import IMAGE_REFERENCE_DIR
 from astropy.utils.data import get_pkg_data_filename
+from astropy.utils.exceptions import AstropyUserWarning
 from astropy.visualization.wcsaxes import WCSAxes
 from astropy.visualization.wcsaxes.frame import EllipticalFrame
 from astropy.visualization.wcsaxes.patches import Quadrangle, SphericalCircle
@@ -664,13 +663,31 @@ class TestBasic(BaseImageTests):
                    edgecolor='red', facecolor='none')
 
         # World coordinates (should not be distorted)
-        r = SphericalCircle((266.4 * u.deg, -29.1 * u.deg), 0.15 * u.degree,
-                            edgecolor='purple', facecolor='none',
-                            transform=ax.get_transform('fk5'))
-        ax.add_patch(r)
+        r1 = SphericalCircle((266.4 * u.deg, -29.1 * u.deg), 0.15 * u.degree,
+                             edgecolor='purple', facecolor='none',
+                             transform=ax.get_transform('fk5'))
+        ax.add_patch(r1)
+
+        r2 = SphericalCircle(SkyCoord(266.4 * u.deg, -29.1 * u.deg), 0.15 * u.degree,
+                             edgecolor='purple', facecolor='none',
+                             transform=ax.get_transform('fk5'))
+
+        with pytest.warns(AstropyUserWarning,
+                          match="Received `center` of representation type "
+                                "<class 'astropy.coordinates.representation.CartesianRepresentation'> "
+                                "will be converted to SphericalRepresentation"):
+            r3 = SphericalCircle(SkyCoord(x=-0.05486461, y=-0.87204803, z=-0.48633538, representation_type='cartesian'),
+                                 0.15 * u.degree, edgecolor='purple',
+                                 facecolor='none', transform=ax.get_transform('fk5'))
 
         ax.coords[0].set_ticklabel_visible(False)
         ax.coords[1].set_ticklabel_visible(False)
+
+        # Test to verify that SphericalCircle works irrespective of whether
+        # the input(center) is a tuple or a SkyCoord object.
+        assert (r1.get_xy() == r2.get_xy()).all()
+        assert np.allclose(r1.get_xy(), r3.get_xy())
+        assert np.allclose(r2.get_xy()[0], [266.4, -29.25])
 
         return fig
 
@@ -938,7 +955,7 @@ def test_1d_plot_put_varying_axis_on_bottom_lon(spatial_wcs_2d_small_angle, slic
     actually changes on the bottom.
 
     For example an aligned wcs, pixel grid where you plot a lon slice through a
-    lat axis, you would end up with no ticks on the bottom as the lon dosen't
+    lat axis, you would end up with no ticks on the bottom as the lon doesn't
     change, and a set of lat ticks on the top because it does but it's the
     correlated axis not the actual one you are plotting against.
     """

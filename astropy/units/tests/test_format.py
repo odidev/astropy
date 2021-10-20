@@ -5,6 +5,7 @@
 Regression tests for the units.format package
 """
 
+from contextlib import nullcontext
 from fractions import Fraction
 
 import pytest
@@ -16,7 +17,6 @@ from astropy.constants import si
 from astropy.units import core, dex, UnitsWarning
 from astropy.units import format as u_format
 from astropy.units.utils import is_effectively_unity
-from astropy.utils.compat.context import nullcontext
 
 
 @pytest.mark.parametrize('strings, unit', [
@@ -181,9 +181,11 @@ def test_ogip_grammar_fail(string):
 class RoundtripBase:
     deprecated_units = set()
 
-    def check_roundtrip(self, unit):
+    def check_roundtrip(self, unit, output_format=None):
+        if output_format is None:
+            output_format = self.format_
         with pytest.warns(None) as w:
-            s = unit.to_string(self.format_)
+            s = unit.to_string(output_format)
             a = core.Unit(s, format=self.format_)
 
         if s in self.deprecated_units:
@@ -213,6 +215,7 @@ class TestRoundtripGeneric(RoundtripBase):
             not isinstance(unit, core.PrefixUnit))])
     def test_roundtrip(self, unit):
         self.check_roundtrip(unit)
+        self.check_roundtrip(unit, output_format='unicode')
         self.check_roundtrip_decompose(unit)
 
 
@@ -286,7 +289,7 @@ class TestRoundtripOGIP(RoundtripBase):
         if str(unit) in ('mag', 'byte', 'Crab'):
             # Skip mag and byte, which decompose into dex and bit, resp.,
             # both of which are unknown to OGIP, as well as Crab, which does
-            # not decompose, and thus gives a depecated unit warning.
+            # not decompose, and thus gives a deprecated unit warning.
             return
 
         power_of_ten = np.log10(unit.decompose().scale)
@@ -377,6 +380,16 @@ def test_console_out():
 
 def test_flexible_float():
     assert u.min._represents.to_string('latex') == r'$\mathrm{60\,s}$'
+
+
+def test_fits_to_string_function_error():
+    """Test function raises TypeError on bad input.
+
+    This instead of returning None, see gh-11825.
+    """
+
+    with pytest.raises(TypeError, match='unit argument must be'):
+        u_format.Fits.to_string(None)
 
 
 def test_fraction_repr():
@@ -606,8 +619,17 @@ def test_powers(power, expected):
     ('\N{ANGSTROM SIGN} \N{OHM SIGN}', u.Angstrom * u.Ohm),
     ('\N{LATIN CAPITAL LETTER A WITH RING ABOVE}', u.Angstrom),
     ('\N{LATIN CAPITAL LETTER A}\N{COMBINING RING ABOVE}', u.Angstrom),
+    ('m\N{ANGSTROM SIGN}', u.milliAngstrom),
     ('°C', u.deg_C),
     ('°', u.deg),
+    ('M⊙', u.Msun),  # \N{CIRCLED DOT OPERATOR}
+    ('L☉', u.Lsun),  # \N{SUN}
+    ('M⊕', u.Mearth),  # normal earth symbol = \N{CIRCLED PLUS}
+    ('M♁', u.Mearth),  # be generous with \N{EARTH}
+    ('R♃', u.Rjup),  # \N{JUPITER}
+    ('′', u.arcmin),  # \N{PRIME}
+    ('R∞', u.Ry),
+    ('Mₚ', u.M_p),
 ])
 def test_unicode(string, unit):
     assert u_format.Generic.parse(string) == unit
@@ -620,8 +642,19 @@ def test_unicode(string, unit):
     'm\N{SUPERSCRIPT MINUS}1',
     'm+\N{SUPERSCRIPT ONE}',
     'm\N{MINUS SIGN}\N{SUPERSCRIPT ONE}',
-    'm\N{ANGSTROM SIGN}',
+    'k\N{ANGSTROM SIGN}',
 ])
 def test_unicode_failures(string):
     with pytest.raises(ValueError):
         u.Unit(string)
+
+
+@pytest.mark.parametrize('format_', ('unicode', 'latex', 'latex_inline'))
+def test_parse_error_message_for_output_only_format(format_):
+    with pytest.raises(NotImplementedError, match='not parse'):
+        u.Unit('m', format=format_)
+
+
+def test_unknown_parser():
+    with pytest.raises(ValueError, match=r"Unknown.*unicode'\] for output only"):
+        u.Unit('m', format='foo')

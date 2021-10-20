@@ -88,7 +88,8 @@ class galactocentric_frame_defaults(ScienceState):
     :meth:`~galactocentric_frame_defaults.get_from_registry` since
     it ensures the immutability of the registry.
 
-    See :ref:`astropy-coordinates-galactocentric-defaults` for more information.
+    See :ref:`astropy:astropy-coordinates-galactocentric-defaults` for more
+    information.
 
     Examples
     --------
@@ -461,7 +462,7 @@ class Galactocentric(BaseCoordinateFrame):
     roughly towards the North Galactic Pole (:math:`b=90^\circ`).
 
     For a more detailed look at the math behind this transformation, see
-    the document :ref:`coordinates-galactocentric`.
+    the document :ref:`astropy:coordinates-galactocentric`.
 
     The frame attributes are listed under **Other Parameters**.
     """
@@ -507,7 +508,7 @@ class Galactocentric(BaseCoordinateFrame):
         """
         # note that the actual value is defined at the module level.  We make at
         # a property here because this module isn't actually part of the public
-        # API, so it's better for it to be accessable from Galactocentric
+        # API, so it's better for it to be accessible from Galactocentric
         return _ROLL0
 
 # ICRS to/from Galactocentric ----------------------->
@@ -584,3 +585,7 @@ def icrs_to_galactocentric(icrs_coord, galactocentric_frame):
 def galactocentric_to_icrs(galactocentric_coord, icrs_frame):
     _check_coord_repr_diff_types(galactocentric_coord)
     return get_matrix_vectors(galactocentric_coord, inverse=True)
+
+
+# Create loopback transformation
+frame_transform_graph._add_merged_transform(Galactocentric, ICRS, Galactocentric)

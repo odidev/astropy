@@ -32,6 +32,7 @@ from astropy.coordinates.baseframe import (
 )
 from astropy.coordinates.builtin_frames import (
     AltAz,
+    HADec,
     FK4,
     FK5,
     Galactic,
@@ -662,7 +663,7 @@ def test_sep():
     i2 = ICRS(ra=0*u.deg, dec=2*u.deg)
 
     sep = i1.separation(i2)
-    assert sep.deg == 1
+    assert_allclose(sep.deg, 1.)
 
     i3 = ICRS(ra=[1, 2]*u.deg, dec=[3, 4]*u.deg, distance=[5, 6]*u.kpc)
     i4 = ICRS(ra=[1, 2]*u.deg, dec=[3, 4]*u.deg, distance=[4, 5]*u.kpc)
@@ -750,6 +751,24 @@ def test_altaz_attributes():
 
     aa3 = AltAz(1*u.deg, 2*u.deg, location=EarthLocation(0*u.deg, 0*u.deg, 0*u.m))
     assert isinstance(aa3.location, EarthLocation)
+
+
+def test_hadec_attributes():
+    hd = HADec(1*u.hourangle, 2*u.deg)
+    assert hd.ha == 1.*u.hourangle
+    assert hd.dec == 2*u.deg
+    assert hd.obstime is None
+    assert hd.location is None
+
+    hd2 = HADec(23*u.hourangle, -2*u.deg, obstime='J2000',
+                location=EarthLocation(0*u.deg, 0*u.deg, 0*u.m))
+    assert_allclose(hd2.ha, -1*u.hourangle)
+    assert hd2.dec == -2*u.deg
+    assert hd2.obstime == Time('J2000')
+    assert isinstance(hd2.location, EarthLocation)
+
+    sr = hd2.represent_as(r.SphericalRepresentation)
+    assert_allclose(sr.lon, -1*u.hourangle)
 
 
 def test_representation():
@@ -1318,35 +1337,6 @@ def test_representation_with_multiple_differentials():
         ICRS(rep)
 
 
-def test_representation_arg_backwards_compatibility():
-    # TODO: this test can be removed when the `representation` argument is
-    # removed from the BaseCoordinateFrame initializer.
-
-    c1 = ICRS(x=1*u.pc, y=2*u.pc, z=3*u.pc,
-              representation_type=r.CartesianRepresentation)
-
-    c2 = ICRS(x=1*u.pc, y=2*u.pc, z=3*u.pc,
-              representation_type=r.CartesianRepresentation)
-
-    c3 = ICRS(x=1*u.pc, y=2*u.pc, z=3*u.pc,
-              representation_type='cartesian')
-
-    assert c1.x == c2.x
-    assert c1.y == c2.y
-    assert c1.z == c2.z
-
-    assert c1.x == c3.x
-    assert c1.y == c3.y
-    assert c1.z == c3.z
-
-    assert c1.representation_type == c1.representation_type
-
-    with pytest.raises(ValueError):
-        ICRS(x=1*u.pc, y=2*u.pc, z=3*u.pc,
-             representation_type='cartesian',
-             representation='cartesian')
-
-
 def test_missing_component_error_names():
     """
     This test checks that the component names are frame component names, not
@@ -1414,18 +1404,7 @@ def test_component_names_repr():
     assert repr(frame).count("JUSTONCE") == 1
 
 
-@pytest.fixture
-def reset_galactocentric_defaults():
-    # TODO: this can be removed, along with the "warning" test below, once we
-    # switch the default to 'latest' in v4.1
-
-    # Resets before each test, and after (the yield is pytest magic)
-    galactocentric_frame_defaults.set('v4.0')
-    yield
-    galactocentric_frame_defaults.set('v4.0')
-
-
-def test_galactocentric_defaults(reset_galactocentric_defaults):
+def test_galactocentric_defaults():
 
     with galactocentric_frame_defaults.set('pre-v4.0'):
         galcen_pre40 = Galactocentric()
@@ -1472,7 +1451,7 @@ def test_galactocentric_defaults(reset_galactocentric_defaults):
     )
 
 
-def test_galactocentric_references(reset_galactocentric_defaults):
+def test_galactocentric_references():
     # references in the "scientific paper"-sense
 
     with galactocentric_frame_defaults.set('pre-v4.0'):

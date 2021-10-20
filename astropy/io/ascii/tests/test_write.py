@@ -2,6 +2,7 @@
 
 import os
 import copy
+from contextlib import nullcontext
 from io import StringIO
 from itertools import chain
 
@@ -11,9 +12,9 @@ import numpy as np
 from astropy.io import ascii
 from astropy import table
 from astropy.table.table_helpers import simple_table
-from astropy.utils.compat.context import nullcontext
-from astropy.utils.exceptions import AstropyWarning, AstropyDeprecationWarning
+from astropy.utils.exceptions import AstropyWarning
 from astropy.utils.compat.optional_deps import HAS_BS4
+from astropy.utils.misc import _NOT_OVERWRITING_MSG_MATCH
 from astropy import units as u
 
 from .common import setup_function, teardown_function  # noqa
@@ -693,25 +694,14 @@ def test_write_overwrite_ascii(format, fast_writer, tmpdir):
         pass
     t = table.Table([['Hello', ''], ['', '']], dtype=['S10', 'S10'])
 
-    with pytest.raises(OSError) as err:
-        t.write(filename, overwrite=False, format=format,
-                fast_writer=fast_writer)
-    assert str(err.value).endswith('already exists')
-
-    with pytest.warns(
-            AstropyDeprecationWarning,
-            match=r".* Automatically overwriting ASCII files is deprecated. "
-            "Use the argument 'overwrite=True' in the future.") as warning:
+    with pytest.raises(OSError, match=_NOT_OVERWRITING_MSG_MATCH):
         t.write(filename, format=format, fast_writer=fast_writer)
-    assert len(warning) == 1
 
     t.write(filename, overwrite=True, format=format,
             fast_writer=fast_writer)
 
     # If the output is a file object, overwrite is ignored
     with open(filename, 'w') as fp:
-        t.write(fp, format=format,
-                fast_writer=fast_writer)
         t.write(fp, overwrite=False, format=format,
                 fast_writer=fast_writer)
         t.write(fp, overwrite=True, format=format,
@@ -748,7 +738,7 @@ def test_roundtrip_masked(fmt_name_class):
     fast = fmt_name in ascii.core.FAST_CLASSES
     try:
         ascii.write(t, out, format=fmt_name, fast_writer=fast)
-    except ImportError:  # Some failed dependency, e.g. PyYAML, skip test
+    except ImportError:  # Some failed dependency, skip test
         return
 
     # No-header formats need to be told the column names
@@ -848,3 +838,20 @@ def test_multidim_column_error(fmt_name_class):
     fast = fmt_name in ascii.core.FAST_CLASSES
     with pytest.raises(ValueError, match=r'column\(s\) with dimension'):
         ascii.write(t, out, format=fmt_name, fast_writer=fast)
+
+
+@pytest.mark.parametrize("fast_writer", [True, False])
+def test_write_as_columns(fast_writer):
+    """
+    Test that writing a set of columns also roundtrips (as long as the
+    table does not have metadata, etc.)
+    """
+    # Use masked in case that makes it more difficult.
+    data = ascii.read(tab_to_fill)
+    data = table.Table(data, masked=True)
+    data['a'].mask = [True, False]
+    data['c'].mask = [False, True]
+    data = list(data.columns.values())
+
+    for test_def in test_def_masked_fill_value:
+        check_write_table(test_def, data, fast_writer)

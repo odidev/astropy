@@ -10,8 +10,7 @@ from astropy.units import Unit, IrreducibleUnit
 from astropy import units as u
 
 from .baseframe import (BaseCoordinateFrame, frame_transform_graph,
-                        _get_repr_cls, _get_diff_cls,
-                        _normalize_representation_type)
+                        _get_repr_cls, _get_diff_cls)
 from .builtin_frames import ICRS
 from .representation import (BaseRepresentation, SphericalRepresentation,
                              UnitSphericalRepresentation)
@@ -196,9 +195,6 @@ def _get_frame_without_data(args, kwargs):
     for attr in frame_cls.frame_attributes:
         if attr in kwargs:
             frame_cls_kwargs[attr] = kwargs.pop(attr)
-
-    # TODO: remove this in a future LTS release
-    _normalize_representation_type(kwargs)
 
     if 'representation_type' in kwargs:
         frame_cls_kwargs['representation_type'] = _get_repr_cls(
@@ -437,7 +433,7 @@ def _parse_coordinate_arg(coords, frame, units, init_kwargs):
         for attr in frame_transform_graph.frame_attributes:
             value = getattr(coords, attr, None)
             use_value = (isinstance(coords, SkyCoord) or
-                         attr not in coords._attr_names_with_defaults)
+                         attr not in coords.get_frame_attr_names())
             if use_value and value is not None:
                 skycoord_kwargs[attr] = value
 

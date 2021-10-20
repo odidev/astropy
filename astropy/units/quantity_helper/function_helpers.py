@@ -42,7 +42,7 @@ import numpy as np
 
 from astropy.units.core import (
     UnitsError, UnitTypeError, dimensionless_unscaled)
-from astropy.utils.compat import NUMPY_LT_1_18, NUMPY_LT_1_20
+from astropy.utils.compat import NUMPY_LT_1_20
 from astropy.utils import isiterable
 
 # In 1.17, overrides are enabled by default, but it is still possible to
@@ -69,7 +69,7 @@ SUBCLASS_SAFE_FUNCTIONS |= {
     np.nonzero, np.argwhere, np.flatnonzero,
     np.diag_indices_from, np.triu_indices_from, np.tril_indices_from,
     np.real, np.imag, np.diagonal, np.diagflat,
-    np.empty_like, np.zeros_like,
+    np.empty_like,
     np.compress, np.extract, np.delete, np.trim_zeros, np.roll, np.take,
     np.put, np.fill_diagonal, np.tile, np.repeat,
     np.split, np.array_split, np.hsplit, np.vsplit, np.dsplit,
@@ -90,9 +90,6 @@ SUBCLASS_SAFE_FUNCTIONS |= {
     np.shares_memory, np.may_share_memory,
     np.apply_along_axis, np.take_along_axis, np.put_along_axis,
     np.linalg.cond, np.linalg.multi_dot}
-
-if NUMPY_LT_1_18:
-    SUBCLASS_SAFE_FUNCTIONS |= {np.alen}
 
 # Implemented as methods on Quantity:
 # np.ediff1d is from setops, but we support it anyway; the others
@@ -116,7 +113,7 @@ UNSUPPORTED_FUNCTIONS |= {np.linalg.slogdet}
 # test_quantity_non_ufuncs.py)
 IGNORED_FUNCTIONS = {
     # Deprecated
-    np.asscalar,
+    np.asscalar, np.alen,
     # I/O - useless for Quantity, since no way to store the unit.
     np.save, np.savez, np.savetxt, np.savez_compressed,
     # Polynomials
@@ -127,10 +124,6 @@ if NUMPY_LT_1_20:
     IGNORED_FUNCTIONS |= {np.fv, np.ipmt, np.irr, np.mirr, np.nper,
                           np.npv, np.pmt, np.ppmt, np.pv, np.rate}
 
-if NUMPY_LT_1_18:
-    IGNORED_FUNCTIONS |= {np.rank}
-else:
-    IGNORED_FUNCTIONS |= {np.alen}
 UNSUPPORTED_FUNCTIONS |= IGNORED_FUNCTIONS
 
 
@@ -189,13 +182,17 @@ def invariant_x_helper(x, *args, **kwargs):
     return (x.view(np.ndarray),) + args, kwargs, x.unit, None
 
 
-# Note that ones_like does *not* work by default (unlike zeros_like) since if
-# one creates an empty array with a unit, one cannot just fill it with unity.
-# Indeed, in this respect, it is a bit of an odd function for Quantity. On the
-# other hand, it matches the idea that a unit is the same as the quantity with
-# that unit and value of 1. Also, it used to work without __array_function__.
-@function_helper
-def ones_like(a, *args, **kwargs):
+# Note that ones_like does *not* work by default since if one creates an empty
+# array with a unit, one cannot just fill it with unity.  Indeed, in this
+# respect, it is a bit of an odd function for Quantity. On the other hand, it
+# matches the idea that a unit is the same as the quantity with that unit and
+# value of 1. Also, it used to work without __array_function__.
+# zeros_like does work by default for regular quantities, because numpy first
+# creates an empty array with the unit and then fills it with 0 (which can have
+# any unit), but for structured dtype this fails (0 cannot have an arbitrary
+# structured unit), so we include it here too.
+@function_helper(helps={np.ones_like, np.zeros_like})
+def like_helper(a, *args, **kwargs):
     subok = args[2] if len(args) > 2 else kwargs.pop('subok', True)
     unit = a.unit if subok else None
     return (a.view(np.ndarray),) + args, kwargs, unit, None

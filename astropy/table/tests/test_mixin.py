@@ -24,7 +24,6 @@ from astropy.utils.exceptions import AstropyUserWarning
 from astropy.utils.metadata import MergeConflictWarning
 from astropy.coordinates.tests.test_representation import representation_equal
 from astropy.io.misc.asdf.tags.helpers import skycoord_equal
-from astropy.utils.compat.optional_deps import HAS_YAML
 
 from .conftest import MIXIN_COLS
 
@@ -41,7 +40,7 @@ def test_attributes(mixin_cols):
     assert m.info.description == 'a'
 
     # Cannot set unit for these classes
-    if isinstance(m, (u.Quantity, coordinates.SkyCoord, time.Time,
+    if isinstance(m, (u.Quantity, coordinates.SkyCoord, time.Time, time.TimeDelta,
                       coordinates.BaseRepresentationOrDifferential)):
         with pytest.raises(AttributeError):
             m.info.unit = u.m
@@ -101,8 +100,6 @@ def test_io_ascii_write():
     from astropy.io.ascii.connect import _get_connectors_table
     t = QTable(MIXIN_COLS)
     for fmt in _get_connectors_table():
-        if fmt['Format'] == 'ascii.ecsv' and not HAS_YAML:
-            continue
         if fmt['Write'] and '.fast_' not in fmt['Format']:
             out = StringIO()
             t.write(out, format=fmt['Format'])
@@ -515,7 +512,7 @@ def test_insert_row(mixin_cols):
     t0 = t.copy()
     t['m'].info.description = 'd'
     idxs = [0, -1, 1, 2, 3]
-    if isinstance(t['m'], (u.Quantity, Column, time.Time, coordinates.SkyCoord)):
+    if isinstance(t['m'], (u.Quantity, Column, time.Time, time.TimeDelta, coordinates.SkyCoord)):
         t.insert_row(1, t[-1])
 
         for name in t.colnames:
@@ -820,7 +817,6 @@ def test_represent_mixins_as_columns_unit_fix():
     serialize.represent_mixins_as_columns(t)
 
 
-@pytest.mark.skipif(not HAS_YAML, reason='mixin columns in .ecsv need yaml')
 def test_skycoord_with_velocity():
     # Regression test for gh-6447
     sc = SkyCoord([1], [2], unit='deg', galcen_v_sun=None)

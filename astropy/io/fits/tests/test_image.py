@@ -166,13 +166,13 @@ class TestImageFunctions(FitsTestCase):
 
         afits = self.temp('a_str.fits')
         bfits = self.temp('b_str.fits')
-        # writting to str specified files
+        # writing to str specified files
         fits.PrimaryHDU(data=a).writeto(afits)
         fits.PrimaryHDU(data=b).writeto(bfits)
         np.testing.assert_array_equal(fits.getdata(afits), a)
         np.testing.assert_array_equal(fits.getdata(bfits), a)
 
-        # writting to fileobjs
+        # writing to fileobjs
         aafits = self.temp('a_fileobj.fits')
         bbfits = self.temp('b_fileobj.fits')
         with open(aafits, mode='wb') as fd:
@@ -187,7 +187,7 @@ class TestImageFunctions(FitsTestCase):
         a = np.arange(105).reshape(3, 5, 7)
         b = np.asfortranarray(a)
 
-        # writting to str specified files
+        # writing to str specified files
         afits = self.temp('a_str_slice.fits')
         bfits = self.temp('b_str_slice.fits')
         fits.PrimaryHDU(data=a[::2, ::2]).writeto(afits)
@@ -195,7 +195,7 @@ class TestImageFunctions(FitsTestCase):
         np.testing.assert_array_equal(fits.getdata(afits), a[::2, ::2])
         np.testing.assert_array_equal(fits.getdata(bfits), a[::2, ::2])
 
-        # writting to fileobjs
+        # writing to fileobjs
         aafits = self.temp('a_fileobj_slice.fits')
         bbfits = self.temp('b_fileobj_slice.fits')
         with open(aafits, mode='wb') as fd:
@@ -630,7 +630,7 @@ class TestImageFunctions(FitsTestCase):
         Regression test for https://github.com/astropy/astropy/issues/2305
 
         This ensures that an HDU containing unsigned integer data always has
-        the apppriate BZERO value in its header.
+        the appropriate BZERO value in its header.
         """
 
         for int_size in (16, 32, 64):
@@ -868,7 +868,6 @@ class TestImageFunctions(FitsTestCase):
         hdul.close()
         hdul = fits.open(self.temp('test_new.fits'))
         assert (hdul[0].data == orig_data).all()
-        hdul = fits.open(self.temp('test_new.fits'))
         hdul.close()
 
     def test_image_update_header(self):
@@ -930,7 +929,7 @@ class TestImageFunctions(FitsTestCase):
         assert (orig_data == hdul[0].data).all()
 
         # Try reshaping the data, then closing and reopening the file; let's
-        # see if all the changes are preseved properly
+        # see if all the changes are preserved properly
         hdul[0].data.shape = (42, 10)
         hdul.close()
 
@@ -1284,7 +1283,7 @@ class TestCompressedImage(FitsTestCase):
         assert 'BSCALE' not in hdul[1].header
 
         # Try reshaping the data, then closing and reopening the file; let's
-        # see if all the changes are preseved properly
+        # see if all the changes are preserved properly
         hdul[1].data.shape = (42, 10)
         hdul.close()
 
@@ -1351,7 +1350,6 @@ class TestCompressedImage(FitsTestCase):
         hdul.close()
         hdul = fits.open(self.temp('test_new.fits'))
         assert (hdul[1].data == orig_data).all()
-        hdul = fits.open(self.temp('test_new.fits'))
         hdul.close()
 
     def test_scale_back_compressed(self):
@@ -1546,7 +1544,7 @@ class TestCompressedImage(FitsTestCase):
 
     def test_compression_header_append2(self):
         """
-        Regresion test for issue https://github.com/astropy/astropy/issues/5827
+        Regression test for issue https://github.com/astropy/astropy/issues/5827
         """
         with fits.open(self.data('comp.fits')) as hdul:
             header = hdul[1].header
@@ -1788,6 +1786,19 @@ class TestCompressedImage(FitsTestCase):
 
         assert len(hdu._header._keyword_indices['EXTNAME']) == 1
 
+    def test_compressed_header_minimal(self):
+        """
+        Regression test for https://github.com/astropy/astropy/issues/11694
+
+        Tests that CompImageHDU can be initialized with a Header that
+        contains few or no cards, and doesn't require specific cards
+        such as 'BITPIX' or 'NAXIS'.
+        """
+        fits.CompImageHDU(data=np.arange(10), header=fits.Header())
+        header = fits.Header({'HELLO': 'world'})
+        hdu = fits.CompImageHDU(data=np.arange(10), header=header)
+        assert hdu.header['HELLO'] == 'world'
+
     @pytest.mark.parametrize(
         ('keyword', 'dtype', 'expected'),
         [('BSCALE', np.uint8, np.float32), ('BSCALE', np.int16, np.float32),
@@ -1961,3 +1972,17 @@ def test_image_write_readonly(tmpdir):
 
     with fits.open(filename) as hdulist:
         assert_equal(hdulist[1].data, [1.0, 2.0, 3.0])
+
+
+def test_int8(tmp_path):
+    '''Test for int8 support, https://github.com/astropy/astropy/issues/11995'''
+    img = np.arange(-50, 50, dtype=np.int8).reshape(10, 10)
+    hdu = fits.PrimaryHDU(img)
+    hdu.writeto(tmp_path / "int8.fits")
+
+    with fits.open(tmp_path / "int8.fits") as hdul:
+        assert hdul[0].header['BITPIX'] == 8
+        assert hdul[0].header['BZERO'] == -128
+        assert hdul[0].header['BSCALE'] == 1.0
+        assert_equal(hdul[0].data, img)
+        assert hdul[0].data.dtype == img.dtype

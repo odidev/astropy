@@ -350,11 +350,16 @@ class Angle(u.SpecificTypeQuantity):
                 "The unit value provided is not an angular unit.")
 
         def do_format(val):
-            s = func(float(val))
-            if alwayssign and not s.startswith('-'):
-                s = '+' + s
-            if format == 'latex':
-                s = f'${s}$'
+            # Check if value is not nan to avoid ValueErrors when turning it into
+            # a hexagesimal string.
+            if not np.isnan(val):
+                s = func(float(val))
+                if alwayssign and not s.startswith('-'):
+                    s = '+' + s
+                if format == 'latex':
+                    s = f'${s}$'
+                return s
+            s = f"{val}"
             return s
 
         format_ufunc = np.vectorize(do_format, otypes=['U'])
@@ -584,7 +589,8 @@ class Latitude(Angle):
         if isinstance(value, Longitude):
             raise TypeError("A Longitude angle cannot be assigned to a Latitude angle")
         # first check bounds
-        self._validate_angles(value)
+        if value is not np.ma.masked:
+            self._validate_angles(value)
         super().__setitem__(item, value)
 
     # Any calculation should drop to Angle
@@ -637,7 +643,7 @@ class Longitude(Angle):
         better to give an actual unit object.  Must be an angular
         unit.
 
-    wrap_angle : :class:`~astropy.coordinates.Angle` or None, optional
+    wrap_angle : angle-like or None, optional
         Angle at which to wrap back to ``wrap_angle - 360 deg``.
         If ``None`` (default), it will be taken to be 360 deg unless ``angle``
         has a ``wrap_angle`` attribute already (i.e., is a ``Longitude``),
@@ -663,7 +669,7 @@ class Longitude(Angle):
         self = super().__new__(cls, angle, unit=unit, **kwargs)
         if wrap_angle is None:
             wrap_angle = getattr(angle, 'wrap_angle', self._default_wrap_angle)
-        self.wrap_angle = wrap_angle
+        self.wrap_angle = wrap_angle  # angle-like b/c property setter
         return self
 
     def __setitem__(self, item, value):

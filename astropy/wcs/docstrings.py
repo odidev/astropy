@@ -736,7 +736,7 @@ relax : bool or int
       standard.
 
     - `int`: a bit field selecting specific extensions to accept.  See
-      :ref:`relaxread` for details.
+      :ref:`astropy:relaxread` for details.
 
 keysel : sequence of flags
     Used to restrict the keyword types considered:
@@ -2108,7 +2108,7 @@ relax : bool or int
       standard.
 
     - `int`: a bit field selecting specific extensions to write.
-      See :ref:`relaxwrite` for details.
+      See :ref:`astropy:relaxwrite` for details.
 
 Returns
 -------
@@ -2231,6 +2231,19 @@ However, it does recognize free-format character (NOST 100-2.0,
 Sect. 5.2.1), integer (Sect. 5.2.3), and floating-point values
 (Sect. 5.2.4) for all keywords.
 
+
+.. warning::
+
+    Many of the attributes of this class require additional processing when
+    modifying underlying C structure.  When needed, this additional processing
+    is implemented in attribute setters. Therefore, for mutable attributes, one
+    should always set the attribute rather than a slice of its current value (or
+    its individual elements) since the latter may lead the class instance to be
+    in an invalid state.  For example, attribute ``crpix`` of a 2D WCS'
+    ``Wcsprm`` object ``wcs`` should be set as ``wcs.crpix = [crpix1, crpix2]``
+    instead of ``wcs.crpix[0] = crpix1; wcs.crpix[1] = crpix2]``.
+
+
 Parameters
 ----------
 header : `~astropy.io.fits.Header`, str, or None.
@@ -2253,7 +2266,7 @@ relax : bool or int, optional
       standard.
 
     - `int`: a bit field selecting specific extensions to accept.  See
-      :ref:`relaxread` for details.
+      :ref:`astropy:relaxread` for details.
 
 naxis : int, optional
     The number of world coordinates axes for the object.  (*naxis* may

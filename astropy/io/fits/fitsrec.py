@@ -855,7 +855,7 @@ class FITS_rec(np.recarray):
         null_fill = encode_ascii(str(ASCIITNULL).rjust(format.width))
 
         # Convert all fields equal to the TNULL value (nullval) to empty fields.
-        # TODO: These fields really should be conerted to NaN or something else undefined.
+        # TODO: These fields really should be converted to NaN or something else undefined.
         # Currently they are converted to empty fields, which are then set to zero.
         dummy = np.where(np.char.strip(dummy) == nullval, null_fill, dummy)
 
@@ -1283,6 +1283,13 @@ class FITS_rec(np.recarray):
         # Replace exponent separator in floating point numbers
         if 'D' in format:
             output_field[:] = output_field.replace(b'E', b'D')
+
+    def tolist(self):
+        # Override .tolist to take care of special case of VLF
+
+        column_lists = [self[name].tolist() for name in self.columns.names]
+
+        return [list(row) for row in zip(*column_lists)]
 
 
 def _get_recarray_field(array, key):

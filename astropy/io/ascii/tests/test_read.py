@@ -178,7 +178,7 @@ def test_read_with_names_arg(fast_reader):
     """
     Test that a bad value of `names` raises an exception.
     """
-    # CParser only uses columns in `names` and thus reports mismach in num_col
+    # CParser only uses columns in `names` and thus reports mismatch in num_col
     with pytest.raises(ascii.InconsistentTableError):
         ascii.read(['c d', 'e f'], names=('a', ), guess=False, fast_reader=fast_reader)
 
@@ -587,7 +587,7 @@ def test_set_guess_kwarg():
 
 @pytest.mark.parametrize('fast_reader', [True, False, 'force'])
 def test_read_rdb_wrong_type(fast_reader):
-    """Read RDB data with inconstent data type (except failure)"""
+    """Read RDB data with inconsistent data type (except failure)"""
     table = """col1\tcol2
 N\tN
 1\tHello"""
@@ -1047,7 +1047,8 @@ def test_guessing_file_object():
     """
     Test guessing a file object.  Fixes #3013 and similar issue noted in #3019.
     """
-    t = ascii.read(open('data/ipac.dat.bz2', 'rb'))
+    with open('data/ipac.dat.bz2', 'rb') as fd:
+        t = ascii.read(fd)
     assert t.colnames == ['ra', 'dec', 'sai', 'v2', 'sptype']
 
 
@@ -1412,25 +1413,27 @@ def test_read_chunks_input_types():
     fpath = 'data/test5.dat'
     t1 = ascii.read(fpath, header_start=1, data_start=3, )
 
-    for fp in (fpath, open(fpath, 'r'), open(fpath, 'r').read()):
-        t_gen = ascii.read(fp, header_start=1, data_start=3,
-                           guess=False, format='fast_basic',
-                           fast_reader={'chunk_size': 400, 'chunk_generator': True})
-        ts = list(t_gen)
-        for t in ts:
-            for col, col1 in zip(t.columns.values(), t1.columns.values()):
-                assert col.name == col1.name
-                assert col.dtype.kind == col1.dtype.kind
+    with open(fpath, 'r') as fd1, open(fpath, 'r') as fd2:
+        for fp in (fpath, fd1, fd2.read()):
+            t_gen = ascii.read(fp, header_start=1, data_start=3,
+                               guess=False, format='fast_basic',
+                               fast_reader={'chunk_size': 400, 'chunk_generator': True})
+            ts = list(t_gen)
+            for t in ts:
+                for col, col1 in zip(t.columns.values(), t1.columns.values()):
+                    assert col.name == col1.name
+                    assert col.dtype.kind == col1.dtype.kind
 
-        assert len(ts) == 4
-        t2 = table.vstack(ts)
-        assert np.all(t1 == t2)
+            assert len(ts) == 4
+            t2 = table.vstack(ts)
+            assert np.all(t1 == t2)
 
-    for fp in (fpath, open(fpath, 'r'), open(fpath, 'r').read()):
-        # Now read the full table in chunks
-        t3 = ascii.read(fp, header_start=1, data_start=3,
-                        fast_reader={'chunk_size': 300})
-        assert np.all(t1 == t3)
+    with open(fpath, 'r') as fd1, open(fpath, 'r') as fd2:
+        for fp in (fpath, fd1, fd2.read()):
+            # Now read the full table in chunks
+            t3 = ascii.read(fp, header_start=1, data_start=3,
+                            fast_reader={'chunk_size': 300})
+            assert np.all(t1 == t3)
 
 
 @pytest.mark.parametrize('masked', [True, False])
@@ -1637,3 +1640,13 @@ False   5
     assert col.dtype.kind == 'b'
     assert np.all(col.mask == [False, False, False, True, False])
     assert np.all(col == [True, False, True, False, False])
+
+
+def test_read_converters_wildcard():
+    '''Test converters where the column name is specified with
+    a wildcard.
+    '''
+    converters = {'F*': [ascii.convert_numpy(np.float32)]}
+    t = ascii.read(['Fabc Iabc', '1 2'], converters=converters)
+    assert np.issubdtype(t['Fabc'].dtype, np.float32)
+    assert not np.issubdtype(t['Iabc'].dtype, np.float32)

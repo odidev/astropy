@@ -288,6 +288,52 @@ def _convert_sequence_data_to_array(data, dtype=None):
     return np_data
 
 
+def _make_compare(oper):
+    """
+    Make Column comparison methods which encode the ``other`` object to utf-8
+    in the case of a bytestring dtype for Py3+.
+
+    Parameters
+    ----------
+    oper : str
+        Operator name
+    """
+    swapped_oper = {'__eq__': '__eq__',
+                    '__ne__': '__ne__',
+                    '__gt__': '__lt__',
+                    '__lt__': '__gt__',
+                    '__ge__': '__le__',
+                    '__le__': '__ge__'}[oper]
+
+    def _compare(self, other):
+        op = oper  # copy enclosed ref to allow swap below
+
+        # Special case to work around #6838.  Other combinations work OK,
+        # see tests.test_column.test_unicode_sandwich_compare().  In this
+        # case just swap self and other.
+        #
+        # This is related to an issue in numpy that was addressed in np 1.13.
+        # However that fix does not make this problem go away, but maybe
+        # future numpy versions will do so.  NUMPY_LT_1_13 to get the
+        # attention of future maintainers to check (by deleting or versioning
+        # the if block below).  See #6899 discussion.
+        # 2019-06-21: still needed with numpy 1.16.
+        if (isinstance(self, MaskedColumn) and self.dtype.kind == 'U'
+                and isinstance(other, MaskedColumn) and other.dtype.kind == 'S'):
+            self, other = other, self
+            op = swapped_oper
+
+        if self.dtype.char == 'S':
+            other = self._encode_str(other)
+
+        # Now just let the regular ndarray.__eq__, etc., take over.
+        result = getattr(super(Column, self), op)(other)
+        # But we should not return Column instances for this case.
+        return result.data if isinstance(result, Column) else result
+
+    return _compare
+
+
 class ColumnInfo(BaseColumnInfo):
     """
     Container for meta information like name, description, format.
@@ -536,6 +582,8 @@ class BaseColumn(_ColumnGetitemShim, np.ndarray):
         if not hasattr(self, 'indices'):  # may have been copied in __new__
             self.indices = []
         self._copy_attrs(obj)
+        if 'info' in getattr(obj, '__dict__', {}):
+            self.info = obj.info
 
     def __array_wrap__(self, out_arr, context=None):
         """
@@ -606,8 +654,8 @@ class BaseColumn(_ColumnGetitemShim, np.ndarray):
             self._format = prev_format
             raise ValueError(
                 "Invalid format for column '{}': could not display "
-                "values in this column using this format ({})".format(
-                    self.name, err.args[0]))
+                "values in this column using this format".format(
+                    self.name)) from err
 
     @property
     def descr(self):
@@ -808,7 +856,7 @@ class BaseColumn(_ColumnGetitemShim, np.ndarray):
 
         equivalencies : list of tuple
            A list of equivalence pairs to try if the unit are not
-           directly convertible.  See :ref:`unit_equivalencies`.
+           directly convertible.  See :ref:`astropy:unit_equivalencies`.
 
         Raises
         ------
@@ -1120,46 +1168,6 @@ class Column(BaseColumn):
         # order-of-magnitude speed-up. [#2994]
         self.data[index] = value
 
-    def _make_compare(oper):
-        """
-        Make comparison methods which encode the ``other`` object to utf-8
-        in the case of a bytestring dtype for Py3+.
-        """
-        swapped_oper = {'__eq__': '__eq__',
-                        '__ne__': '__ne__',
-                        '__gt__': '__lt__',
-                        '__lt__': '__gt__',
-                        '__ge__': '__le__',
-                        '__le__': '__ge__'}[oper]
-
-        def _compare(self, other):
-            op = oper  # copy enclosed ref to allow swap below
-
-            # Special case to work around #6838.  Other combinations work OK,
-            # see tests.test_column.test_unicode_sandwich_compare().  In this
-            # case just swap self and other.
-            #
-            # This is related to an issue in numpy that was addressed in np 1.13.
-            # However that fix does not make this problem go away, but maybe
-            # future numpy versions will do so.  NUMPY_LT_1_13 to get the
-            # attention of future maintainers to check (by deleting or versioning
-            # the if block below).  See #6899 discussion.
-            # 2019-06-21: still needed with numpy 1.16.
-            if (isinstance(self, MaskedColumn) and self.dtype.kind == 'U'
-                    and isinstance(other, MaskedColumn) and other.dtype.kind == 'S'):
-                self, other = other, self
-                op = swapped_oper
-
-            if self.dtype.char == 'S':
-                other = self._encode_str(other)
-
-            # Now just let the regular ndarray.__eq__, etc., take over.
-            result = getattr(super(), op)(other)
-            # But we should not return Column instances for this case.
-            return result.data if isinstance(result, Column) else result
-
-        return _compare
-
     __eq__ = _make_compare('__eq__')
     __ne__ = _make_compare('__ne__')
     __gt__ = _make_compare('__gt__')
@@ -1393,6 +1401,11 @@ class MaskedColumn(Column, _MaskedColumnGetitemShim, ma.MaskedArray):
                                unit=unit, format=format, description=description,
                                meta=meta, copy=copy, copy_indices=copy_indices)
         self = ma.MaskedArray.__new__(cls, data=self_data, mask=mask)
+        # The above process preserves info relevant for Column, but this does
+        # not include serialize_method (and possibly other future attributes)
+        # relevant for MaskedColumn, so we set info explicitly.
+        if 'info' in getattr(data, '__dict__', {}):
+            self.info = data.info
 
         # Note: do not set fill_value in the MaskedArray constructor because this does not
         # go through the fill_value workarounds.
@@ -1538,6 +1551,11 @@ class MaskedColumn(Column, _MaskedColumnGetitemShim, ma.MaskedArray):
         # Fixes issue #3023: when calling getitem with a MaskedArray subclass
         # the original object attributes are not copied.
         if out.__class__ is self.__class__:
+            # TODO: this part is essentially the same as what is done in
+            # __array_finalize__ and could probably be called directly in our
+            # override of __getitem__ in _columns_mixins.pyx). Refactor?
+            if 'info' in self.__dict__:
+                out.info = self.info
             out.parent_table = None
             # we need this because __getitem__ does a shallow copy of indices
             if out.indices is self.indices:

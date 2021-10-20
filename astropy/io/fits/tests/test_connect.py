@@ -1,5 +1,4 @@
 import gc
-import sys
 import pathlib
 import warnings
 
@@ -17,17 +16,18 @@ from astropy.io import fits
 from astropy import units as u
 from astropy.table import Table, QTable, NdarrayMixin, Column
 from astropy.table.table_helpers import simple_table
+from astropy.units import allclose as quantity_allclose
 from astropy.units.format.fits import UnitScaleError
 from astropy.utils.data import get_pkg_data_filename
 from astropy.utils.exceptions import (AstropyUserWarning,
                                       AstropyDeprecationWarning)
+from astropy.utils.misc import _NOT_OVERWRITING_MSG_MATCH
 
 from astropy.coordinates import (SkyCoord, Latitude, Longitude, Angle, EarthLocation,
                                  SphericalRepresentation, CartesianRepresentation,
                                  SphericalCosLatDifferential)
 from astropy.time import Time, TimeDelta
 from astropy.units.quantity import QuantityInfo
-from astropy.utils.compat.optional_deps import HAS_YAML  # noqa
 
 
 def equal_data(a, b):
@@ -109,7 +109,6 @@ class TestSingleTable:
         assert t2['a'].unit == u.m
         assert t2['c'].unit == u.km / u.s
 
-    @pytest.mark.skipif('not HAS_YAML')
     def test_with_custom_units_qtable(self, tmpdir):
         # Test only for QTable - for Table's Column, new units are dropped
         # (as is checked in test_write_drop_nonstandard_units).
@@ -185,28 +184,42 @@ class TestSingleTable:
 
     @pytest.mark.parametrize('masked', [True, False])
     def test_masked_nan(self, masked, tmpdir):
+        """Check that masked values by default are replaced by NaN.
+
+        This should work for any shape and be independent of whether the
+        Table is formally masked or not.
+
+        """
         filename = str(tmpdir.join('test_masked_nan.fits'))
         a = np.ma.MaskedArray([5.25, 8.5, 3.75, 6.25], mask=[1, 0, 1, 0])
         b = np.ma.MaskedArray([2.5, 4.5, 6.75, 8.875], mask=[1, 0, 0, 1], dtype='f4')
-        t1 = Table([a, b], names=['a', 'b'], masked=masked)
+        c = np.ma.stack([a, b], axis=-1)
+        t1 = Table([a, b, c], names=['a', 'b', 'c'], masked=masked)
         t1.write(filename, overwrite=True)
         t2 = Table.read(filename)
         assert_array_equal(t2['a'].data, [np.nan, 8.5, np.nan, 6.25])
         assert_array_equal(t2['b'].data, [np.nan, 4.5, 6.75, np.nan])
+        assert_array_equal(t2['c'].data, np.stack([t2['a'].data, t2['b'].data],
+                                                  axis=-1))
         assert np.all(t1['a'].mask == t2['a'].mask)
         assert np.all(t1['b'].mask == t2['b'].mask)
+        assert np.all(t1['c'].mask == t2['c'].mask)
 
     def test_masked_serialize_data_mask(self, tmpdir):
         filename = str(tmpdir.join('test_masked_nan.fits'))
         a = np.ma.MaskedArray([5.25, 8.5, 3.75, 6.25], mask=[1, 0, 1, 0])
         b = np.ma.MaskedArray([2.5, 4.5, 6.75, 8.875], mask=[1, 0, 0, 1])
-        t1 = Table([a, b], names=['a', 'b'])
-        t1.write(filename, overwrite=True, serialize_method='data_mask')
+        c = np.ma.stack([a, b], axis=-1)
+        t1 = Table([a, b, c], names=['a', 'b', 'c'])
+        t1.write(filename, overwrite=True)
         t2 = Table.read(filename)
         assert_array_equal(t2['a'].data, [5.25, 8.5, 3.75, 6.25])
         assert_array_equal(t2['b'].data, [2.5, 4.5, 6.75, 8.875])
+        assert_array_equal(t2['c'].data, np.stack([t2['a'].data, t2['b'].data],
+                                                  axis=-1))
         assert np.all(t1['a'].mask == t2['a'].mask)
         assert np.all(t1['b'].mask == t2['b'].mask)
+        assert np.all(t1['c'].mask == t2['c'].mask)
 
     def test_read_from_fileobj(self, tmpdir):
         filename = str(tmpdir.join('test_read_from_fileobj.fits'))
@@ -235,9 +248,8 @@ class TestSingleTable:
         with pytest.warns(AstropyUserWarning, match='spam') as w:
             t.write(filename)
         assert len(w) == 1
-        if table_type is Table or not HAS_YAML:
-            assert ('cannot be recovered in reading. '
-                    'If pyyaml is installed') in str(w[0].message)
+        if table_type is Table:
+            assert ('cannot be recovered in reading. ') in str(w[0].message)
         else:
             assert 'lost to non-astropy fits readers' in str(w[0].message)
 
@@ -314,6 +326,14 @@ class TestSingleTable:
         t.write(filename, append=True)
         check_equal(filename, 3, start_from=2)
         assert equal_data(t2, Table.read(filename, hdu=1))
+
+    def test_write_overwrite(self, tmpdir):
+        t = Table(self.data)
+        filename = str(tmpdir.join('test_write_overwrite.fits'))
+        t.write(filename)
+        with pytest.raises(OSError, match=_NOT_OVERWRITING_MSG_MATCH):
+            t.write(filename)
+        t.write(filename, overwrite=True)
 
     def test_mask_nans_on_read(self, tmpdir):
         filename = str(tmpdir.join('test_inexact_format_parse_on_read.fits'))
@@ -686,10 +706,13 @@ def assert_objects_equal(obj1, obj2, attrs, compare_class=True):
             if a2 is None:
                 a2 = {}
 
-        assert np.all(a1 == a2)
+        if isinstance(a1, np.ndarray) and a1.dtype.kind == 'f':
+            assert quantity_allclose(a1, a2, rtol=1e-15)
+        else:
+            assert np.all(a1 == a2)
 
 # Testing FITS table read/write with mixins.  This is mostly
-# copied from ECSV mixin testing.
+# copied from ECSV mixin testing.  Analogous tests also exist for HDF5.
 
 
 el = EarthLocation(x=1 * u.km, y=3 * u.km, z=5 * u.km)
@@ -703,8 +726,17 @@ sd = SphericalCosLatDifferential(
 srd = SphericalRepresentation(sr, differentials=sd)
 sc = SkyCoord([1, 2], [3, 4], unit='deg,deg', frame='fk4',
               obstime='J1990.5')
-scc = sc.copy()
-scc.representation_type = 'cartesian'
+scd = SkyCoord([1, 2], [3, 4], [5, 6], unit='deg,deg,m', frame='fk4',
+               obstime=['J1990.5', 'J1991.5'])
+scdc = scd.copy()
+scdc.representation_type = 'cartesian'
+scpm = SkyCoord([1, 2], [3, 4], [5, 6], unit='deg,deg,pc',
+                pm_ra_cosdec=[7, 8]*u.mas/u.yr, pm_dec=[9, 10]*u.mas/u.yr)
+scpmrv = SkyCoord([1, 2], [3, 4], [5, 6], unit='deg,deg,pc',
+                  pm_ra_cosdec=[7, 8]*u.mas/u.yr, pm_dec=[9, 10]*u.mas/u.yr,
+                  radial_velocity=[11, 12]*u.km/u.s)
+scrv = SkyCoord([1, 2], [3, 4], [5, 6], unit='deg,deg,pc',
+                radial_velocity=[11, 12]*u.km/u.s)
 tm = Time([2450814.5, 2450815.5], format='jd', scale='tai', location=el)
 
 # NOTE: in the test below the name of the column "x" for the Quantity is
@@ -714,9 +746,11 @@ mixin_cols = {
     'tm': tm,
     'dt': TimeDelta([1, 2] * u.day),
     'sc': sc,
-    'scc': scc,
-    'scd': SkyCoord([1, 2], [3, 4], [5, 6], unit='deg,deg,m', frame='fk4',
-                    obstime=['J1990.5', 'J1991.5']),
+    'scd': scd,
+    'scdc': scdc,
+    'scpm': scpm,
+    'scpmrv': scpmrv,
+    'scrv': scrv,
     'x': [1, 2] * u.m,
     'lat': Latitude([1, 2] * u.deg),
     'lon': Longitude([1, 2] * u.deg, wrap_angle=180. * u.deg),
@@ -735,8 +769,14 @@ compare_attrs = {
     'tm': time_attrs,
     'dt': ['shape', 'value', 'format', 'scale'],
     'sc': ['ra', 'dec', 'representation_type', 'frame.name'],
-    'scc': ['x', 'y', 'z', 'representation_type', 'frame.name'],
     'scd': ['ra', 'dec', 'distance', 'representation_type', 'frame.name'],
+    'scdc': ['x', 'y', 'z', 'representation_type', 'frame.name'],
+    'scpm': ['ra', 'dec', 'distance', 'pm_ra_cosdec', 'pm_dec',
+             'representation_type', 'frame.name'],
+    'scpmrv': ['ra', 'dec', 'distance', 'pm_ra_cosdec', 'pm_dec',
+               'radial_velocity', 'representation_type', 'frame.name'],
+    'scrv': ['ra', 'dec', 'distance', 'radial_velocity', 'representation_type',
+             'frame.name'],
     'x': ['value', 'unit'],
     'lon': ['value', 'unit', 'wrap_angle'],
     'lat': ['value', 'unit'],
@@ -751,7 +791,6 @@ compare_attrs = {
 }
 
 
-@pytest.mark.skipif('not HAS_YAML')
 def test_fits_mixins_qtable_to_table(tmpdir):
     """Test writing as QTable and reading as Table.  Ensure correct classes
     come out.
@@ -789,7 +828,6 @@ def test_fits_mixins_qtable_to_table(tmpdir):
         assert_objects_equal(col, col2, attrs, compare_class)
 
 
-@pytest.mark.skipif('not HAS_YAML')
 @pytest.mark.parametrize('table_cls', (Table, QTable))
 def test_fits_mixins_as_one(table_cls, tmpdir):
     """Test write/read all cols at once and validate intermediate column names"""
@@ -803,9 +841,17 @@ def test_fits_mixins_as_one(table_cls, tmpdir):
                         'lat',
                         'lon',
                         'sc.ra', 'sc.dec',
-                        'scc.x', 'scc.y', 'scc.z',
                         'scd.ra', 'scd.dec', 'scd.distance',
                         'scd.obstime.jd1', 'scd.obstime.jd2',
+                        'scdc.x', 'scdc.y', 'scdc.z',
+                        'scdc.obstime.jd1', 'scdc.obstime.jd2',
+                        'scpm.ra', 'scpm.dec', 'scpm.distance',
+                        'scpm.pm_ra_cosdec', 'scpm.pm_dec',
+                        'scpmrv.ra', 'scpmrv.dec', 'scpmrv.distance',
+                        'scpmrv.pm_ra_cosdec', 'scpmrv.pm_dec',
+                        'scpmrv.radial_velocity',
+                        'scrv.ra', 'scrv.dec', 'scrv.distance',
+                        'scrv.radial_velocity',
                         'sd.d_lon_coslat', 'sd.d_lat', 'sd.d_distance',
                         'sr.lon', 'sr.lat', 'sr.distance',
                         'srd.lon', 'srd.lat', 'srd.distance',
@@ -835,7 +881,6 @@ def test_fits_mixins_as_one(table_cls, tmpdir):
         assert hdus[1].columns.names == serialized_names
 
 
-@pytest.mark.skipif('not HAS_YAML')
 @pytest.mark.parametrize('name_col', list(mixin_cols.items()))
 @pytest.mark.parametrize('table_cls', (Table, QTable))
 def test_fits_mixins_per_column(table_cls, name_col, tmpdir):
@@ -868,31 +913,6 @@ def test_fits_mixins_per_column(table_cls, name_col, tmpdir):
         assert t2[name]._time.jd2.__class__ is np.ndarray
 
 
-def test_warn_for_dropped_info_attributes(tmpdir, monkeypatch):
-    # make sure that yaml cannot be imported if it is available
-    monkeypatch.setitem(sys.modules, 'yaml', None)
-
-    filename = str(tmpdir.join('test.fits'))
-    t = Table([[1, 2]])
-    t['col0'].info.description = 'hello'
-    with pytest.warns(AstropyUserWarning, match=r"table contains column\(s\) "
-                      "with defined 'format'") as warns:
-        t.write(filename, overwrite=True)
-    assert len(warns) == 1
-
-
-def test_error_for_mixins_but_no_yaml(tmpdir, monkeypatch):
-    # make sure that yaml cannot be imported if it is available
-    monkeypatch.setitem(sys.modules, 'yaml', None)
-
-    filename = str(tmpdir.join('test.fits'))
-    t = Table([mixin_cols['sc']])
-    with pytest.raises(TypeError) as err:
-        t.write(filename)
-    assert "cannot write type SkyCoord column 'col0' to FITS without PyYAML" in str(err.value)
-
-
-@pytest.mark.skipif('not HAS_YAML')
 def test_info_attributes_with_no_mixins(tmpdir):
     """Even if there are no mixin columns, if there is metadata that would be lost it still
     gets serialized
@@ -910,7 +930,6 @@ def test_info_attributes_with_no_mixins(tmpdir):
     assert t2['col0'].meta['a'] == {'b': 'c'}
 
 
-@pytest.mark.skipif('not HAS_YAML')
 @pytest.mark.parametrize('method', ['set_cols', 'names', 'class'])
 def test_round_trip_masked_table_serialize_mask(tmpdir, method):
     """
@@ -948,21 +967,6 @@ def test_round_trip_masked_table_serialize_mask(tmpdir, method):
         assert np.all(t2[name] == t[name])
 
 
-@pytest.mark.skipif('not HAS_YAML')
-def test_read_serialized_without_yaml(tmpdir, monkeypatch):
-    filename = str(tmpdir.join('test.fits'))
-    t = Table([mixin_cols['sc']])
-    t.write(filename)
-
-    monkeypatch.setitem(sys.modules, 'yaml', None)
-    with pytest.warns(AstropyUserWarning):
-        t2 = Table.read(filename)
-
-    assert t2.colnames == ['col0.ra', 'col0.dec']
-    assert len(t2) == 2
-
-
-@pytest.mark.skipif('not HAS_YAML')
 def test_meta_not_modified(tmpdir):
     filename = str(tmpdir.join('test.fits'))
     t = Table(data=[Column([1, 2], 'a', description='spam')])

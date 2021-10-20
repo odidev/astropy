@@ -14,7 +14,7 @@ jobs:
     steps:
     - name: Label PR
       uses: actions/labeler@main
-      if: github.event_name == 'pull_request_target'
+      if: github.event_name == 'pull_request_target' && github.event.pull_request.user.login != 'meeseeksmachine'
       with:
         repo-token: "${{ secrets.GITHUB_TOKEN }}"
     - name: Greet new contributors
@@ -29,6 +29,14 @@ jobs:
             the meantime, please double-check the [guidelines for submitting
             issues](https://github.com/astropy/astropy/blob/main/CONTRIBUTING.md#reporting-issues)
             and make sure you've provided the requested details.
+
+
+            GitHub issues in the Astropy repository are used to track bug
+            reports and feature requests; If your issue poses a question about
+            how to use Astropy, please instead raise your question in the
+            [Astropy Discourse user
+            forum](https://community.openastronomy.org/c/astropy/8) and close
+            this issue.
 
 
             If you feel that this issue has not been responded to in a timely

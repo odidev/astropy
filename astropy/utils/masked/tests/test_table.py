@@ -6,10 +6,10 @@ from numpy.testing import assert_array_equal
 import pytest
 
 from astropy import units as u
-from astropy.table import QTable
+from astropy.table import QTable, hstack, vstack, join
 
 from astropy.utils.masked import Masked
-from astropy.utils.compat.optional_deps import HAS_YAML, HAS_H5PY
+from astropy.utils.compat.optional_deps import HAS_H5PY
 
 from .test_masked import assert_masked_equal
 
@@ -33,6 +33,13 @@ class MaskedArrayTableSetup:
         self.t = QTable([self.ma], names=['ma'])
 
 
+class MaskedQuantityTableSetup(MaskedArrayTableSetup):
+    @classmethod
+    def setup_arrays(self):
+        self.a = np.array([3., 5., 0.]) << u.m
+        self.mask_a = np.array([True, False, False])
+
+
 class TestMaskedArrayTable(MaskedArrayTableSetup):
     def test_table_initialization(self):
         assert_array_equal(self.t['ma'].unmasked, self.a)
@@ -42,7 +49,23 @@ class TestMaskedArrayTable(MaskedArrayTableSetup):
             '    5.0',
             '    0.0']
 
-    @pytest.mark.skipif(not HAS_YAML, reason='serialization needs yaml')
+    def test_info_basics(self):
+        assert self.t['ma'].info.name == 'ma'
+        assert 'serialize_method' in self.t['ma'].info.attr_names
+        t2 = self.t.copy()
+        t2['ma'].info.format = '.2f'
+        t2['ma'].info.serialize_method['fits'] = 'nonsense'
+        assert repr(t2).splitlines()[-3:] == [
+            '    ———',
+            '   5.00',
+            '   0.00']
+        # Check that if we slice, things get copied over correctly.
+        t3 = t2[:2]
+        assert t3['ma'].info.name == 'ma'
+        assert t3['ma'].info.format == '.2f'
+        assert 'serialize_method' in t3['ma'].info.attr_names
+        assert t3['ma'].info.serialize_method['fits'] == 'nonsense'
+
     @pytest.mark.parametrize('file_format', FILE_FORMATS)
     def test_table_write(self, file_format, tmpdir):
         name = str(tmpdir.join(f"a.{file_format}"))
@@ -56,19 +79,14 @@ class TestMaskedArrayTable(MaskedArrayTableSetup):
         assert isinstance(t2['ma'], self.ma.__class__)
         assert np.all(t2['ma'] == self.ma)
         assert np.all(t2['ma'].mask == self.mask_a)
-        if file_format == 'fits' and type(self.a) is np.ndarray:
+        if file_format == 'fits':
             # Imperfect roundtrip through FITS native format description.
             assert self.t['ma'].info.format in t2['ma'].info.format
         else:
             assert t2['ma'].info.format == self.t['ma'].info.format
 
-
-@pytest.mark.skipif(not HAS_YAML, reason='serialization needs yaml')
-class TestSerializationMethods(MaskedArrayTableSetup):
-    # TODO: ensure this works for MaskedQuantity, etc., as well.
-    # Needs to somehow pass on serialize_method; see MaskedArraySubclassInfo.
     @pytest.mark.parametrize('serialize_method', ['data_mask', 'null_value'])
-    def test_table_write(self, serialize_method, tmpdir):
+    def test_table_write_serialization(self, serialize_method, tmpdir):
         name = str(tmpdir.join("test.ecsv"))
         self.t.write(name, serialize_method=serialize_method)
         with open(name) as fh:
@@ -95,8 +113,60 @@ class TestSerializationMethods(MaskedArrayTableSetup):
             self.t.write(name, serialize_method='bad_serialize_method')
 
 
-class TestMaskedQuantityTable(TestMaskedArrayTable):
-    @classmethod
-    def setup_arrays(self):
-        self.a = np.array([3., 5., 0.]) << u.m
-        self.mask_a = np.array([True, False, False])
+class TestMaskedQuantityTable(TestMaskedArrayTable, MaskedQuantityTableSetup):
+    # Runs tests from TestMaskedArrayTable as well as some extra ones.
+    def test_table_operations_requiring_masking(self):
+        t1 = self.t
+        t2 = QTable({'ma2': Masked([1, 2] * u.m)})
+        t12 = hstack([t1, t2], join_type='outer')
+        assert np.all(t12['ma'].mask == [True, False, False])
+        # 'ma2' is shorter by one so we expect one True from hstack so length matches
+        assert np.all(t12['ma2'].mask == [False, False, True])
+
+        t12 = hstack([t1, t2], join_type='inner')
+        assert np.all(t12['ma'].mask == [True, False])
+        assert np.all(t12['ma2'].mask == [False, False])
+
+        # Vstack tables with different column names. In this case we get masked
+        # values
+        t12 = vstack([t1, t2], join_type='outer')
+        #  ma ma2
+        #  m   m
+        # --- ---
+        #  ——  ——
+        # 5.0  ——
+        # 0.0  ——
+        #  —— 1.0
+        #  —— 2.0
+        assert np.all(t12['ma'].mask == [True, False, False, True, True])
+        assert np.all(t12['ma2'].mask == [True, True, True, False, False])
+
+    def test_table_operations_requiring_masking_auto_promote(self):
+        MaskedQuantity = Masked(u.Quantity)
+        t1 = QTable({'ma1': [1, 2] * u.m})
+        t2 = QTable({'ma2': [3, 4, 5] * u.m})
+        t12 = hstack([t1, t2], join_type='outer')
+        assert isinstance(t12['ma1'], MaskedQuantity)
+        assert np.all(t12['ma1'].mask == [False, False, True])
+        assert np.all(t12['ma1'] == [1, 2, 0] * u.m)
+        assert not isinstance(t12['ma2'], MaskedQuantity)
+        assert isinstance(t12['ma2'], u.Quantity)
+        assert np.all(t12['ma2'] == [3, 4, 5] * u.m)
+
+        t12 = hstack([t1, t2], join_type='inner')
+        assert isinstance(t12['ma1'], u.Quantity)
+        assert not isinstance(t12['ma1'], MaskedQuantity)
+        assert isinstance(t12['ma2'], u.Quantity)
+        assert not isinstance(t12['ma2'], MaskedQuantity)
+
+        # Vstack tables with different column names. In this case we get masked
+        # values
+        t12 = vstack([t1, t2], join_type='outer')
+        assert np.all(t12['ma1'].mask == [False, False, True, True, True])
+        assert np.all(t12['ma2'].mask == [True, True, False, False, False])
+
+        t1['a'] = [1, 2]
+        t2['a'] = [1, 3, 4]
+        t12 = join(t1, t2, join_type='outer')
+        assert np.all(t12['ma1'].mask == [False, False, True, True])
+        assert np.all(t12['ma2'].mask == [False, True, False, False])

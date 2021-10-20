@@ -420,21 +420,18 @@ reshape |Time| instances and take specific parts using
 :meth:`~astropy.time.Time.flatten`, :attr:`~astropy.time.Time.T`,
 :meth:`~astropy.time.Time.transpose`, :meth:`~astropy.time.Time.swapaxes`,
 :meth:`~astropy.time.Time.diagonal`, :meth:`~astropy.time.Time.squeeze`, or
-:meth:`~astropy.time.Time.take`. Similarly, on ``numpy`` version 1.17
-and later
-corresponding functions as well as others that affect the shape, such as
-`~numpy.atleast_1d` and `~numpy.rollaxis`, work as expected.  (The relevant
-functions have to be explicitly enabled in ``astropy`` source code; let us
-know if a ``numpy`` function is not supported that you think should work.)
+:meth:`~astropy.time.Time.take`. Corresponding functions, as well as others
+that affect the shape, such as `~numpy.atleast_1d` and `~numpy.rollaxis`, work
+as expected. (The relevant functions have to be explicitly enabled in
+``astropy`` source code; let us know if a ``numpy`` function is not supported
+that you think should work.)
 
 Examples
 """"""""
 
 .. EXAMPLE START: Reshaping Time Instances Using NumPy Method Analogs
 
-To reshape |Time| instances:
-
-.. doctest-requires:: numpy>=1.17
+To reshape |Time| instances::
 
   >>> t.reshape(2, 3)
   <Time object: scale='utc' format='mjd' value=[[50000.  50000.5 50001. ]
@@ -756,7 +753,7 @@ The operations available with |Time| objects include:
 - Get the representation of the time value(s) in a particular `time format`_.
 - Get a new time object for the same time value(s) but referenced to a different
   `time scale`_.
-- Calculate the `sidereal time`_ corresponding to the time value(s).
+- Calculate `sidereal time and Earth rotation angle`_ corresponding to the time value(s).
 - Do time arithmetic involving |Time| and/or |TimeDelta| objects.
 
 Get and Set Values
@@ -1122,8 +1119,8 @@ printed. To control the number of elements to be displayed, set the
      '1998-01-01 00:00:02.000' ... '1998-01-01 00:16:37.000'
      '1998-01-01 00:16:38.000' '1998-01-01 00:16:39.000']
 
-Sidereal Time
--------------
+Sidereal Time and Earth Rotation Angle
+--------------------------------------
 
 Apparent or mean sidereal time can be calculated using
 :meth:`~astropy.time.Time.sidereal_time`. The method returns a |Longitude|
@@ -1132,10 +1129,21 @@ the location with which the |Time| object is initialized. Like the scale
 transformations, ERFA_ C-library routines are used under the hood, which support
 calculations following different IAU resolutions.
 
+Similarly, one can calculate the Earth rotation angle with
+:meth:`~astropy.time.Time.earth_rotation_angle`. Unlike sidereal time, which
+is referred to the equinox and is a complicated function of both UT1 and
+Terrestrial Time, the Earth rotation angle is referred to the Celestial
+Intermediate Origin (CIO) and is a linear function of UT1 alone.
+
+For the recent IAU precession models, as well as for the Earth rotation angle,
+the result includes the TIO locator (s'), which positions the Terrestrial
+Intermediate Origin on the equator of the Celestial Intermediate Pole (CIP)
+and is rigorously corrected for polar motion.
+
 Example
 ^^^^^^^
 
-.. EXAMPLE START: Calculating Sidereal Time for Time Objects
+.. EXAMPLE START: Calculating Sidereal Time and Earth Rotation Angle for Time Objects
 
 To calculate sidereal time::
 
@@ -1144,6 +1152,8 @@ To calculate sidereal time::
   <Longitude 13.08952187 hourangle>
   >>> t.sidereal_time('apparent')  # doctest: +FLOAT_CMP +REMOTE_DATA
   <Longitude 13.08950368 hourangle>
+  >>> t.earth_rotation_angle()  # doctest: +FLOAT_CMP +REMOTE_DATA
+  <Longitude 13.08436206 hourangle>
   >>> t.sidereal_time('apparent', 'greenwich')  # doctest: +FLOAT_CMP +REMOTE_DATA
   <Longitude 5.08950368 hourangle>
   >>> t.sidereal_time('apparent', '-90d')  # doctest: +FLOAT_CMP +REMOTE_DATA

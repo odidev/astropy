@@ -18,7 +18,6 @@ from astropy.utils import indent
 from astropy import units as u
 from astropy.constants import c as speed_of_light
 from .representation import CartesianRepresentation, CartesianDifferential
-from .orbital_elements import calc_moon
 from .builtin_frames import GCRS, ICRS, ITRS, TETE
 from .builtin_frames.utils import get_jd12
 
@@ -205,102 +204,108 @@ def _get_body_barycentric_posvel(body, time, ephemeris=None,
 
     Notes
     -----
-    No velocity can be calculated with the built-in ephemeris for the Moon.
-
     Whether or not velocities are calculated makes little difference for the
     built-in ephemerides, but for most JPL ephemeris files, the execution time
     roughly doubles.
     """
-
-    if ephemeris is None:
-        ephemeris = solar_system_ephemeris.get()
-        if ephemeris is None:
-            raise ValueError(_EPHEMERIS_NOTE)
-        kernel = solar_system_ephemeris.kernel
-    else:
-        kernel = _get_kernel(ephemeris)
-
-    jd1, jd2 = get_jd12(time, 'tdb')
-    if kernel is None:
-        body = body.lower()
-        earth_pv_helio, earth_pv_bary = erfa.epv00(jd1, jd2)
-        if body == 'earth':
-            body_pv_bary = earth_pv_bary
-
-        elif body == 'moon':
-            if get_velocity:
-                raise KeyError("the Moon's velocity cannot be calculated with "
-                               "the '{}' ephemeris.".format(ephemeris))
-            return calc_moon(time).cartesian
-
+    # If the ephemeris is to be taken from solar_system_ephemeris, or the one
+    # it already contains, use the kernel there.  Otherwise, open the ephemeris,
+    # possibly downloading it, but make sure the file is closed at the end.
+    default_kernel = ephemeris is None or ephemeris is solar_system_ephemeris._value
+    kernel = None
+    try:
+        if default_kernel:
+            if solar_system_ephemeris.get() is None:
+                raise ValueError(_EPHEMERIS_NOTE)
+            kernel = solar_system_ephemeris.kernel
         else:
-            sun_pv_bary = erfa.pvmpv(earth_pv_bary, earth_pv_helio)
-            if body == 'sun':
-                body_pv_bary = sun_pv_bary
+            kernel = _get_kernel(ephemeris)
+
+        jd1, jd2 = get_jd12(time, 'tdb')
+        if kernel is None:
+            body = body.lower()
+            earth_pv_helio, earth_pv_bary = erfa.epv00(jd1, jd2)
+            if body == 'earth':
+                body_pv_bary = earth_pv_bary
+
+            elif body == 'moon':
+                # The moon98 documentation notes that it takes TT, but that TDB leads
+                # to errors smaller than the uncertainties in the algorithm.
+                # moon98 returns the astrometric position relative to the Earth.
+                moon_pv_geo = erfa.moon98(jd1, jd2)
+                body_pv_bary = erfa.pvppv(moon_pv_geo, earth_pv_bary)
             else:
-                try:
-                    body_index = PLAN94_BODY_NAME_TO_PLANET_INDEX[body]
-                except KeyError:
-                    raise KeyError("{}'s position and velocity cannot be "
-                                   "calculated with the '{}' ephemeris."
-                                   .format(body, ephemeris))
-                body_pv_helio = erfa.plan94(jd1, jd2, body_index)
-                body_pv_bary = erfa.pvppv(body_pv_helio, sun_pv_bary)
-
-        body_pos_bary = CartesianRepresentation(
-            body_pv_bary['p'], unit=u.au, xyz_axis=-1, copy=False)
-        if get_velocity:
-            body_vel_bary = CartesianRepresentation(
-                body_pv_bary['v'], unit=u.au/u.day, xyz_axis=-1,
-                copy=False)
-
-    else:
-        if isinstance(body, str):
-            # Look up kernel chain for JPL ephemeris, based on name
-            try:
-                kernel_spec = BODY_NAME_TO_KERNEL_SPEC[body.lower()]
-            except KeyError:
-                raise KeyError("{}'s position cannot be calculated with "
-                               "the {} ephemeris.".format(body, ephemeris))
-        else:
-            # otherwise, assume the user knows what their doing and intentionally
-            # passed in a kernel chain
-            kernel_spec = body
-
-        # jplephem cannot handle multi-D arrays, so convert to 1D here.
-        jd1_shape = getattr(jd1, 'shape', ())
-        if len(jd1_shape) > 1:
-            jd1, jd2 = jd1.ravel(), jd2.ravel()
-        # Note that we use the new jd1.shape here to create a 1D result array.
-        # It is reshaped below.
-        body_posvel_bary = np.zeros((2 if get_velocity else 1, 3) +
-                                    getattr(jd1, 'shape', ()))
-        for pair in kernel_spec:
-            spk = kernel[pair]
-            if spk.data_type == 3:
-                # Type 3 kernels contain both position and velocity.
-                posvel = spk.compute(jd1, jd2)
-                if get_velocity:
-                    body_posvel_bary += posvel.reshape(body_posvel_bary.shape)
+                sun_pv_bary = erfa.pvmpv(earth_pv_bary, earth_pv_helio)
+                if body == 'sun':
+                    body_pv_bary = sun_pv_bary
                 else:
-                    body_posvel_bary[0] += posvel[:4]
+                    try:
+                        body_index = PLAN94_BODY_NAME_TO_PLANET_INDEX[body]
+                    except KeyError:
+                        raise KeyError("{}'s position and velocity cannot be "
+                                       "calculated with the '{}' ephemeris."
+                                       .format(body, ephemeris))
+                    body_pv_helio = erfa.plan94(jd1, jd2, body_index)
+                    body_pv_bary = erfa.pvppv(body_pv_helio, sun_pv_bary)
+
+            body_pos_bary = CartesianRepresentation(
+                body_pv_bary['p'], unit=u.au, xyz_axis=-1, copy=False)
+            if get_velocity:
+                body_vel_bary = CartesianRepresentation(
+                    body_pv_bary['v'], unit=u.au/u.day, xyz_axis=-1,
+                    copy=False)
+
+        else:
+            if isinstance(body, str):
+                # Look up kernel chain for JPL ephemeris, based on name
+                try:
+                    kernel_spec = BODY_NAME_TO_KERNEL_SPEC[body.lower()]
+                except KeyError:
+                    raise KeyError("{}'s position cannot be calculated with "
+                                   "the {} ephemeris.".format(body, ephemeris))
             else:
-                # spk.generate first yields the position and then the
-                # derivative. If no velocities are desired, body_posvel_bary
-                # has only one element and thus the loop ends after a single
-                # iteration, avoiding the velocity calculation.
-                for body_p_or_v, p_or_v in zip(body_posvel_bary,
-                                               spk.generate(jd1, jd2)):
-                    body_p_or_v += p_or_v
+                # otherwise, assume the user knows what their doing and intentionally
+                # passed in a kernel chain
+                kernel_spec = body
 
-        body_posvel_bary.shape = body_posvel_bary.shape[:2] + jd1_shape
-        body_pos_bary = CartesianRepresentation(body_posvel_bary[0],
-                                                unit=u.km, copy=False)
-        if get_velocity:
-            body_vel_bary = CartesianRepresentation(body_posvel_bary[1],
-                                                    unit=u.km/u.day, copy=False)
+            # jplephem cannot handle multi-D arrays, so convert to 1D here.
+            jd1_shape = getattr(jd1, 'shape', ())
+            if len(jd1_shape) > 1:
+                jd1, jd2 = jd1.ravel(), jd2.ravel()
+                # Note that we use the new jd1.shape here to create a 1D result array.
+                # It is reshaped below.
+            body_posvel_bary = np.zeros((2 if get_velocity else 1, 3) +
+                                        getattr(jd1, 'shape', ()))
+            for pair in kernel_spec:
+                spk = kernel[pair]
+                if spk.data_type == 3:
+                    # Type 3 kernels contain both position and velocity.
+                    posvel = spk.compute(jd1, jd2)
+                    if get_velocity:
+                        body_posvel_bary += posvel.reshape(body_posvel_bary.shape)
+                    else:
+                        body_posvel_bary[0] += posvel[:4]
+                else:
+                    # spk.generate first yields the position and then the
+                    # derivative. If no velocities are desired, body_posvel_bary
+                    # has only one element and thus the loop ends after a single
+                    # iteration, avoiding the velocity calculation.
+                    for body_p_or_v, p_or_v in zip(body_posvel_bary,
+                                                   spk.generate(jd1, jd2)):
+                        body_p_or_v += p_or_v
 
-    return (body_pos_bary, body_vel_bary) if get_velocity else body_pos_bary
+            body_posvel_bary.shape = body_posvel_bary.shape[:2] + jd1_shape
+            body_pos_bary = CartesianRepresentation(body_posvel_bary[0],
+                                                    unit=u.km, copy=False)
+            if get_velocity:
+                body_vel_bary = CartesianRepresentation(body_posvel_bary[1],
+                                                        unit=u.km/u.day, copy=False)
+
+        return (body_pos_bary, body_vel_bary) if get_velocity else body_pos_bary
+
+    finally:
+        if not default_kernel and kernel is not None:
+            kernel.daf.file.close()
 
 
 def get_body_barycentric_posvel(body, time, ephemeris=None):
@@ -331,9 +336,6 @@ def get_body_barycentric_posvel(body, time, ephemeris=None):
 
     Notes
     -----
-    The velocity cannot be calculated for the Moon.  To just get the position,
-    use :func:`~astropy.coordinates.get_body_barycentric`.
-
     {_EPHEMERIS_NOTE}
     """
     return _get_body_barycentric_posvel(body, time, ephemeris)
@@ -401,11 +403,6 @@ def _get_apparent_body_position(body, time, ephemeris, obsgeoloc=None):
     """
     if ephemeris is None:
         ephemeris = solar_system_ephemeris.get()
-    # builtin ephemeris and moon is a special case, with no need to account for
-    # light travel time, since this is already included in the Meeus algorithm
-    # used.
-    if ephemeris == 'builtin' and body.lower() == 'moon':
-        return get_body_barycentric(body, time, ephemeris)
 
     # Calculate position given approximate light travel time.
     delta_light_travel_time = 20. * u.s

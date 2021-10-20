@@ -11,10 +11,7 @@ import numpy as np
 from astropy.io.registry import _readers, _writers, _identifiers
 from astropy.io import registry as io_registry
 from astropy.table import Table
-from astropy.utils.compat.context import nullcontext
-from astropy.utils.exceptions import AstropyUserWarning
 from astropy import units as u
-from astropy.utils.compat.optional_deps import HAS_YAML
 
 # Since we reset the readers/writers below, we need to also import any
 # sub-package that defines readers/writers first
@@ -404,6 +401,13 @@ def test_read_valid_return():
     assert isinstance(t, TestData)
 
 
+def test_write_return():
+    """Most writers will return None, but other values are not forbidden."""
+    io_registry.register_writer('test', TestData, lambda *args: True)
+    res = TestData.write(TestData(), format="test")
+    assert res is True
+
+
 def test_non_existing_unknown_ext():
     """Raise the correct error when attempting to read a non-existing
     file with an unknown extension."""
@@ -506,16 +510,8 @@ class TestSubclass:
         mt['a'].format = '.4f'
         mt['a'].description = 'hello'
 
-        if HAS_YAML:
-            ctx = nullcontext()
-        else:
-            ctx = pytest.warns(
-                AstropyUserWarning,
-                match="These will be dropped unless you install PyYAML")
-
         testfile = str(tmpdir.join('junk.fits'))
-        with ctx:
-            mt.write(testfile, overwrite=True)
+        mt.write(testfile, overwrite=True)
 
         t = MTable.read(testfile)
         assert np.all(mt == t)
@@ -523,10 +519,7 @@ class TestSubclass:
         assert type(t) is MTable
         assert t['a'].unit == u.m
         assert t['a'].format == '{:13.4f}'
-        if HAS_YAML:
-            assert t['a'].description == 'hello'
-        else:
-            assert t['a'].description is None
+        assert t['a'].description == 'hello'
 
 
 def test_directory(tmpdir):

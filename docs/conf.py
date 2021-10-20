@@ -31,19 +31,40 @@ import configparser
 from datetime import datetime
 
 from packaging.requirements import Requirement
+from packaging.specifiers import SpecifierSet
 
 try:
     import importlib.metadata as importlib_metadata
 except ImportError:
     import importlib_metadata
 
-try:
-    from sphinx_astropy.conf.v1 import *  # noqa
-except ImportError:
-    print('ERROR: the documentation requires the sphinx-astropy package to be installed')
+# -- Check for missing dependencies -------------------------------------------
+missing_requirements = {}
+for line in importlib_metadata.requires('astropy'):
+    if 'extra == "docs"' in line:
+        req = Requirement(line.split(';')[0])
+        req_package = req.name.lower()
+        req_specifier = str(req.specifier)
+
+        try:
+            version = importlib_metadata.version(req_package)
+        except importlib_metadata.PackageNotFoundError:
+            missing_requirements[req_package] = req_specifier
+
+        if version not in SpecifierSet(req_specifier, prereleases=True):
+            missing_requirements[req_package] = req_specifier
+
+if missing_requirements:
+    print('The following packages could not be found and are required to '
+          'build the documentation:')
+    for key, val in missing_requirements.items():
+        print(f'    * {key} {val}')
+    print('Please install the "docs" requirements.')
     sys.exit(1)
 
+from sphinx_astropy.conf.v1 import *  # noqa
 
+# -- Plot configuration -------------------------------------------------------
 plot_rcparams = {}
 plot_rcparams['figure.figsize'] = (6, 6)
 plot_rcparams['savefig.facecolor'] = 'none'
@@ -121,61 +142,42 @@ numpydoc_xref_param_type = True
 
 # Words not to cross-reference. Most likely, these are common words used in
 # parameter type descriptions that may be confused for classes of the same
-# name.
-numpydoc_xref_ignore = {
-    'type', 'optional', 'default', 'or', 'of', 'method', 'instance', "like",
-    "class", 'subclass', "keyword-only", "default", "thereof", "mixin",
+# name. The base set comes from sphinx-astropy. We add more here.
+numpydoc_xref_ignore.update({
+    "mixin",
     # needed in subclassing numpy  # TODO! revisit
     "Arguments", "Path",
     # TODO! not need to ignore.
     "flag", "bits",
-}
+})
 
 # Mappings to fully qualified paths (or correct ReST references) for the
 # aliases/shortcuts used when specifying the types of parameters.
 # Numpy provides some defaults
 # https://github.com/numpy/numpydoc/blob/b352cd7635f2ea7748722f410a31f937d92545cc/numpydoc/xref.py#L62-L94
-# so we only need to define Astropy-specific x-refs
-numpydoc_xref_aliases = {
-    # ultra-general
-    "-like": ":term:`-like`",
+# and a base set comes from sphinx-astropy.
+# so here we mostly need to define Astropy-specific x-refs
+numpydoc_xref_aliases.update({
     # python & adjacent
     "file-like": ":term:`python:file-like object`",
     "file": ":term:`python:file object`",
-    "iterator": ":term:`python:iterator`",
     "path-like": ":term:`python:path-like object`",
     "module": ":term:`python:module`",
     "buffer-like": ":term:buffer-like",
-    "function": ":term:`python:function`",
+    "hashable": ":term:`python:hashable`",
     # for matplotlib
     "color": ":term:`color`",
     # for numpy
     "ints": ":class:`python:int`",
     # for astropy
-    "unit-like": ":term:`unit-like`",
-    "quantity-like": ":term:`quantity-like`",
-    "angle-like": ":term:`angle-like`",
-    "table-like": ":term:`table-like`",
-    "time-like": ":term:`time-like`",
-    "frame-like": ":term:`frame-like`",
-    "coordinate-like": ":term:`coordinate-like`",
     "number": ":term:`number`",
     "Representation": ":class:`~astropy.coordinates.BaseRepresentation`",
     "writable": ":term:`writable file-like object`",
     "readable": ":term:`readable file-like object`",
     "BaseHDU": ":doc:`HDU </io/fits/api/hdus>`"
-}
-# Astropy units physical types
-from astropy.units.physical import _units_and_physical_types
-numpydoc_xref_physical_type_aliases = {}
-for _, ptypes in _units_and_physical_types:
-    ptypes = {ptypes} if isinstance(ptypes, str) else ptypes
-    for ptype in ptypes:
-        key = f"'{ptype}'"
-        val = f":ref:`'{ptype}' <{ptype}>`"
-        numpydoc_xref_physical_type_aliases[key] = val
-
-numpydoc_xref_aliases.update(numpydoc_xref_physical_type_aliases)
+})
+# Add from sphinx-astropy 1) glossary aliases 2) physical types.
+numpydoc_xref_aliases.update(numpydoc_xref_astropy_aliases)
 
 
 # -- Project information ------------------------------------------------------
@@ -355,22 +357,42 @@ def rstjinja(app, docname, source):
         source[0] = rendered
 
 
-def resolve_astropy_dev_reference(app, env, node, contnode):
+def resolve_astropy_and_dev_reference(app, env, node, contnode):
     """
-    Reference targets beginning with ``astropy-dev:`` are a special case.
+    Reference targets for ``astropy:`` and ``astropy-dev:`` are special cases.
 
-    If we are building the development docs it is a local ref targetting the
+    Documentation links in astropy can be set up as intersphinx links so that
+    affiliate packages do not have to override the docstrings when building
+    the docs.
+
+    If we are building the development docs it is a local ref targeting the
     label ``astropy-dev:<label>``, but for stable docs it should be an
     intersphinx resolution to the development docs.
 
     See https://github.com/astropy/astropy/issues/11366
     """
+    # should the node be processed?
+    reftarget = node.get('reftarget')  # str or None
+    if str(reftarget).startswith('astropy:'):
+        # This allows Astropy to use intersphinx links to itself and have
+        # them resolve to local links. Downstream packages will see intersphinx.
+        # TODO! deprecate this if sphinx-doc/sphinx/issues/9169 is implemented.
+        process, replace = True, 'astropy:'
+    elif dev and str(reftarget).startswith('astropy-dev:'):
+        process, replace = True, 'astropy-dev:'
+    else:
+        process, replace = False, ''
 
-    reftarget = node.get('reftarget')
-    if dev and reftarget is not None and reftarget.startswith('astropy-dev:'):
+    # make link local
+    if process:
         reftype = node.get('reftype')
         refdoc = node.get('refdoc', app.env.docname)
-        reftarget = reftarget.split(':', 1)[1]
+        # convert astropy intersphinx targets to local links.
+        # there are a few types of intersphinx link patters, as described in
+        # https://docs.readthedocs.io/en/stable/guides/intersphinx.html
+        reftarget = reftarget.replace(replace, '')
+        if reftype == "doc":  # also need to replace the doc link
+            node.replace_attr("reftarget", reftarget)
         # Delegate to the ref node's original domain/target (typically :ref:)
         try:
             domain = app.env.domains[node['refdomain']]
@@ -401,5 +423,5 @@ def setup(app):
     # Set this to higher priority than intersphinx; this way when building
     # dev docs astropy-dev: targets will go to the local docs instead of the
     # intersphinx mapping
-    app.connect("missing-reference", resolve_astropy_dev_reference,
+    app.connect("missing-reference", resolve_astropy_and_dev_reference,
                 priority=400)

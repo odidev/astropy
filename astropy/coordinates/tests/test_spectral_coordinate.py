@@ -1,3 +1,5 @@
+from contextlib import nullcontext
+
 import astropy.units as u
 import numpy as np
 from numpy.testing import assert_allclose
@@ -16,7 +18,6 @@ from astropy.coordinates import (SkyCoord, EarthLocation, ICRS, GCRS, Galactic,
 from astropy.tests.helper import assert_quantity_allclose, quantity_allclose
 from astropy.utils.exceptions import AstropyUserWarning, AstropyWarning
 from astropy.utils.data import get_pkg_data_filename
-from astropy.utils.compat.context import nullcontext
 
 from astropy.coordinates.spectral_coordinate import SpectralCoord, _apply_relativistic_doppler_shift
 from astropy.wcs.wcsapi.fitswcs import VELOCITY_FRAMES as FITSWCS_VELOCITY_FRAMES
@@ -693,7 +694,7 @@ def test_shift_to_rest_star_withobserver():
 
     # note this probably will not work on the first try, but it's ok if this is
     # "good enough", where good enough is estimated below.  But that could be
-    # adjusted if we think that's too agressive of a precision target for what
+    # adjusted if we think that's too aggressive of a precision target for what
     # the machinery can handle
     # with pytest.raises(AssertionError):
     assert_quantity_allclose(vcorr, drv, atol=10*u.m/u.s)
@@ -793,7 +794,7 @@ def test_asteroid_velocity_frame_shifts():
     # now check the behavior of with_observer_stationary_relative_to: we shift each coord
     # into the velocity frame of its *own* target.  That would then be a
     # spectralcoord that would allow direct physical comparison of the two
-    # diffferent spec_corrds.  There's no way to test that, without
+    # different spec_corrds.  There's no way to test that, without
     # actual data, though.
 
     # spec_coord2 is redshifted, so we test that it behaves the way "shifting
@@ -838,9 +839,6 @@ EXPECTED_VELOCITY_FRAMES = {'geocent': 'gcrs',
 
 @pytest.mark.parametrize('specsys', list(EXPECTED_VELOCITY_FRAMES))
 def test_spectralcoord_accuracy(specsys):
-
-    # PyYAML is needed to read in the ecsv table
-    pytest.importorskip('yaml')
 
     # This is a test to check the numerical results of transformations between
     # different velocity frames in SpectralCoord. This compares the velocity

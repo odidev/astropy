@@ -1,18 +1,21 @@
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
 
+from astropy.table.table_helpers import ArrayWrapper
+from astropy.coordinates.earth import EarthLocation
+from astropy.units.quantity import Quantity
 from collections import OrderedDict
+from contextlib import nullcontext
 
 import pytest
 import numpy as np
 
-from astropy.table import Table, QTable, TableMergeError, Column, MaskedColumn
+from astropy.table import Table, QTable, TableMergeError, Column, MaskedColumn, NdarrayMixin
 from astropy.table.operations import _get_out_class, join_skycoord, join_distance
 from astropy import units as u
 from astropy.utils import metadata
 from astropy.utils.metadata import MergeConflictError
-from astropy.utils.compat.context import nullcontext
 from astropy import table
-from astropy.time import Time
+from astropy.time import Time, TimeDelta
 from astropy.coordinates import (SkyCoord, SphericalRepresentation,
                                  UnitSphericalRepresentation,
                                  CartesianRepresentation,
@@ -25,6 +28,22 @@ from astropy.utils.compat.optional_deps import HAS_SCIPY  # noqa
 
 def sort_eq(list1, list2):
     return sorted(list1) == sorted(list2)
+
+
+def check_mask(col, exp_mask):
+    """Check that col.mask == exp_mask"""
+    if hasattr(col, 'mask'):
+        # Coerce expected mask into dtype of col.mask. In particular this is
+        # needed for types like EarthLocation where the mask is a structured
+        # array.
+        exp_mask = np.array(exp_mask).astype(col.mask.dtype)
+        out = np.all(col.mask == exp_mask)
+    else:
+        # With no mask the check is OK if all the expected mask values
+        # are False (i.e. no auto-conversion to MaskedQuantity if it was
+        # not required by the join).
+        out = np.all(exp_mask == False)
+    return out
 
 
 class TestJoin():
@@ -518,37 +537,37 @@ class TestJoin():
             assert np.all(out['m1'] == col[[0, 3]])
             assert np.all(out['m2'] == col[[0, 3]])
 
-        # Check for left, right, outer join which requires masking.  Only Time
-        # supports this currently.
-        if cls_name == 'Time':
+        # Check for left, right, outer join which requires masking. Works for
+        # the listed mixins classes.
+        if isinstance(col, (Quantity, Time, TimeDelta)):
             out = table.join(t1, t2, join_type='left')
             assert len(out) == 3
             assert np.all(out['idx'] == [0, 1, 3])
             assert np.all(out['m1'] == t1['m1'])
             assert np.all(out['m2'] == t2['m2'])
-            assert np.all(out['m1'].mask == [False, False, False])
-            assert np.all(out['m2'].mask == [False, True, False])
+            check_mask(out['m1'], [False, False, False])
+            check_mask(out['m2'], [False, True, False])
 
             out = table.join(t1, t2, join_type='right')
             assert len(out) == 3
             assert np.all(out['idx'] == [0, 2, 3])
             assert np.all(out['m1'] == t1['m1'])
             assert np.all(out['m2'] == t2['m2'])
-            assert np.all(out['m1'].mask == [False, True, False])
-            assert np.all(out['m2'].mask == [False, False, False])
+            check_mask(out['m1'], [False, True, False])
+            check_mask(out['m2'], [False, False, False])
 
             out = table.join(t1, t2, join_type='outer')
             assert len(out) == 4
             assert np.all(out['idx'] == [0, 1, 2, 3])
             assert np.all(out['m1'] == col)
             assert np.all(out['m2'] == col)
-            assert np.all(out['m1'].mask == [False, False, True, False])
-            assert np.all(out['m2'].mask == [False, True, False, False])
+            assert check_mask(out['m1'], [False, False, True, False])
+            assert check_mask(out['m2'], [False, True, False, False])
         else:
             # Otherwise make sure it fails with the right exception message
             for join_type in ('outer', 'left', 'right'):
                 with pytest.raises(NotImplementedError) as err:
-                    table.join(t1, t2, join_type='outer')
+                    table.join(t1, t2, join_type=join_type)
                 assert ('join requires masking' in str(err.value)
                         or 'join unavailable' in str(err.value))
 
@@ -701,6 +720,73 @@ class TestJoin():
                '     4 1.1 .. 1.0    -- .. --',
                '     5   -- .. --  0.5 .. 0.0']
         assert str(t12).splitlines() == exp
+
+    def test_keys_left_right_basic(self):
+        """Test using the keys_left and keys_right args to specify different
+        join keys. This takes the standard test case but renames column 'a'
+        to 'x' and 'y' respectively for tables 1 and 2. Then it compares the
+        normal join on 'a' to the new join on 'x' and 'y'."""
+        self._setup()
+
+        for join_type in ('inner', 'left', 'right', 'outer'):
+            t1 = self.t1.copy()
+            t2 = self.t2.copy()
+            # Expected is same as joining on 'a' but with names 'x', 'y' instead
+            t12_exp = table.join(t1, t2, keys='a', join_type=join_type)
+            t12_exp.add_column(t12_exp['a'], name='x', index=1)
+            t12_exp.add_column(t12_exp['a'], name='y', index=len(t1.colnames) + 1)
+            del t12_exp['a']
+
+            # Different key names
+            t1.rename_column('a', 'x')
+            t2.rename_column('a', 'y')
+            keys_left_list = ['x']  # Test string key name
+            keys_right_list = [['y']]  # Test list of string key names
+            if join_type == 'outer':
+                # Just do this for the outer join (others are the same)
+                keys_left_list.append([t1['x'].tolist()])  # Test list key column
+                keys_right_list.append([t2['y']])  # Test Column key column
+
+            for keys_left, keys_right in zip(keys_left_list, keys_right_list):
+                t12 = table.join(t1, t2, keys_left=keys_left, keys_right=keys_right,
+                                 join_type=join_type)
+
+                assert t12.colnames == t12_exp.colnames
+                for col in t12.values_equal(t12_exp).itercols():
+                    assert np.all(col)
+                assert t12_exp.meta == t12.meta
+
+    def test_keys_left_right_exceptions(self):
+        """Test exceptions using the keys_left and keys_right args to specify
+        different join keys.
+        """
+        self._setup()
+        t1 = self.t1
+        t2 = self.t2
+
+        msg = r"left table does not have key column 'z'"
+        with pytest.raises(ValueError, match=msg):
+            table.join(t1, t2, keys_left='z', keys_right=['a'])
+
+        msg = r"left table has different length from key \[1, 2\]"
+        with pytest.raises(ValueError, match=msg):
+            table.join(t1, t2, keys_left=[[1, 2]], keys_right=['a'])
+
+        msg = r"keys arg must be None if keys_left and keys_right are supplied"
+        with pytest.raises(ValueError, match=msg):
+            table.join(t1, t2, keys_left='z', keys_right=['a'], keys='a')
+
+        msg = r"keys_left and keys_right args must have same length"
+        with pytest.raises(ValueError, match=msg):
+            table.join(t1, t2, keys_left=['a', 'b'], keys_right=['a'])
+
+        msg = r"keys_left and keys_right must both be provided"
+        with pytest.raises(ValueError, match=msg):
+            table.join(t1, t2, keys_left=['a', 'b'])
+
+        msg = r"cannot supply join_funcs arg and keys_left / keys_right"
+        with pytest.raises(ValueError, match=msg):
+            table.join(t1, t2, keys_left=['a'], keys_right=['a'], join_funcs={})
 
 
 class TestSetdiff():
@@ -1116,7 +1202,7 @@ class TestVStack():
         cls_name = type(col).__name__
 
         # Vstack works for these classes:
-        if isinstance(col, (u.Quantity, Time, SkyCoord,
+        if isinstance(col, (u.Quantity, Time, TimeDelta, SkyCoord, EarthLocation,
                             BaseRepresentationOrDifferential)):
             out = table.vstack([t, t])
             assert len(out) == len_col * 2
@@ -1139,13 +1225,13 @@ class TestVStack():
         # Check for outer stack which requires masking.  Only Time supports
         # this currently.
         t2 = table.QTable([col], names=['b'])  # different from col name for t
-        if cls_name == 'Time':
+        if isinstance(col, (Time, TimeDelta, Quantity)):
             out = table.vstack([t, t2], join_type='outer')
             assert len(out) == len_col * 2
             assert np.all(out['a'][:len_col] == col)
             assert np.all(out['b'][len_col:] == col)
-            assert np.all(out['a'].mask == [False] * len_col + [True] * len_col)
-            assert np.all(out['b'].mask == [True] * len_col + [False] * len_col)
+            assert check_mask(out['a'], [False] * len_col + [True] * len_col)
+            assert check_mask(out['b'], [True] * len_col + [False] * len_col)
             # check directly stacking mixin columns:
             out2 = table.vstack([t, t2['b']])
             assert np.all(out['a'] == out2['a'])
@@ -1557,12 +1643,12 @@ class TestHStack():
             assert np.all(out['col0_2'] == col2)
 
         # Time class supports masking, all other mixins do not
-        if cls_name == 'Time':
+        if isinstance(col1, (Time, TimeDelta, Quantity)):
             out = table.hstack([t1, t2], join_type='outer')
             assert len(out) == len(t1)
             assert np.all(out['col0_1'] == col1)
             assert np.all(out['col0_2'][:len(col2)] == col2)
-            assert np.all(out['col0_2'].mask == [False, False, True, True])
+            assert check_mask(out['col0_2'], [False, False, True, True])
 
             # check directly stacking mixin columns:
             out2 = table.hstack([t1, t2['col0']], join_type='outer')
@@ -1691,7 +1777,7 @@ def test_unique(operation_table_type):
 def test_vstack_bytes(operation_table_type):
     """
     Test for issue #5617 when vstack'ing bytes columns in Py3.
-    This is really an upsteam numpy issue numpy/numpy/#8403.
+    This is really an upstream numpy issue numpy/numpy/#8403.
     """
     t = operation_table_type([[b'a']], names=['a'])
     assert t['a'].itemsize == 1
@@ -1829,13 +1915,13 @@ def test_masking_required_exception():
     Test that outer join, hstack and vstack fail for a mixin column which
     does not support masking.
     """
-    col = [1, 2, 3, 4] * u.m
+    col = table.NdarrayMixin([0, 1, 2, 3])
     t1 = table.QTable([[1, 2, 3, 4], col], names=['a', 'b'])
     t2 = table.QTable([[1, 2], col[:2]], names=['a', 'c'])
 
     with pytest.raises(NotImplementedError) as err:
         table.vstack([t1, t2], join_type='outer')
-    assert 'vstack requires masking' in str(err.value)
+    assert 'vstack unavailable' in str(err.value)
 
     with pytest.raises(NotImplementedError) as err:
         table.hstack([t1, t2], join_type='outer')

@@ -18,6 +18,9 @@
 .. |SkyCoord| replace:: :class:`~astropy.coordinates.SkyCoord`
 .. |SpectralCoord| replace:: `~astropy.coordinates.SpectralCoord`
 
+.. Cosmology
+.. |Cosmology| replace:: :class:`~astropy.cosmology.Cosmology`
+
 .. SAMP
 .. |SAMPClient| replace:: :class:`~astropy.samp.SAMPClient`
 .. |SAMPIntegratedClient| replace:: :class:`~astropy.samp.SAMPIntegratedClient`
@@ -48,6 +51,7 @@
 .. |PhysicalType| replace:: :class:`~astropy.units.PhysicalType`
 .. |Quantity| replace:: :class:`~astropy.units.Quantity`
 .. |Unit| replace:: :class:`~astropy.units.UnitBase`
+.. |StructuredUnit| replace:: :class:`~astropy.units.StructuredUnit`
 
 .. Utils
 .. |Masked| replace:: :class:`~astropy.utils.masked.Masked`
@@ -95,6 +99,10 @@
 .. pyyaml
 .. |minimum_pyyaml_version| replace:: {pyyaml}
 
+.. packaging
+.. _packaging: https://packaging.pypa.io/
+.. |minimum_packaging_version| replace:: {packaging}
+
 .. IPython
 .. _IPython: http://ipython.org/
 .. _`ipython github`: https://github.com/ipython/ipython
@@ -103,6 +111,9 @@
 
 .. pip
 .. _pip: https://pip.pypa.io
+
+.. pipenv
+.. _pipenv: https://pipenv.pypa.io/en/latest/
 
 .. virtualenv
 .. _virtualenv: https://pypi.org/project/virtualenv

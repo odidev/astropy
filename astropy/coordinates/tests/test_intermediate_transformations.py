@@ -17,10 +17,10 @@ from astropy import units as u
 from astropy.tests.helper import assert_quantity_allclose as assert_allclose
 from astropy.time import Time
 from astropy.coordinates import (
-    EarthLocation, get_sun, ICRS, GCRS, CIRS, ITRS, AltAz,
+    EarthLocation, get_sun, ICRS, GCRS, CIRS, ITRS, AltAz, HADec,
     PrecessedGeocentric, CartesianRepresentation, SkyCoord,
     CartesianDifferential, SphericalRepresentation, UnitSphericalRepresentation,
-    HCRS, HeliocentricMeanEcliptic, TEME, TETE)
+    HCRS, HeliocentricMeanEcliptic, TEME, TETE, Angle)
 from astropy.coordinates.solar_system import _apparent_position_in_true_coordinates, get_body
 from astropy.utils import iers
 from astropy.utils.exceptions import AstropyWarning, AstropyDeprecationWarning
@@ -172,6 +172,31 @@ def test_cirs_to_altaz():
     assert_allclose(cirs.dec, cirs3.dec)
 
 
+def test_cirs_to_hadec():
+    """
+    Check the basic CIRS<->HADec transforms.
+    """
+    from astropy.coordinates import EarthLocation
+
+    usph = golden_spiral_grid(200)
+    dist = np.linspace(0.5, 1, len(usph)) * u.pc
+    cirs = CIRS(usph, obstime='J2000')
+    crepr = SphericalRepresentation(lon=usph.lon, lat=usph.lat, distance=dist)
+    cirscart = CIRS(crepr, obstime=cirs.obstime, representation_type=CartesianRepresentation)
+
+    loc = EarthLocation(lat=0*u.deg, lon=0*u.deg, height=0*u.m)
+    hadecframe = HADec(location=loc, obstime=Time('J2005'))
+
+    cirs2 = cirs.transform_to(hadecframe).transform_to(cirs)
+    cirs3 = cirscart.transform_to(hadecframe).transform_to(cirs)
+
+    # check round-tripping
+    assert_allclose(cirs.ra, cirs2.ra)
+    assert_allclose(cirs.dec, cirs2.dec)
+    assert_allclose(cirs.ra, cirs3.ra)
+    assert_allclose(cirs.dec, cirs3.dec)
+
+
 def test_gcrs_itrs():
     """
     Check basic GCRS<->ITRS transforms for round-tripping.
@@ -270,6 +295,33 @@ def test_gcrs_altaz():
     assert_allclose(aa1.az, aa3.az)
 
 
+def test_gcrs_hadec():
+    """
+    Check GCRS<->HADec transforms for round-tripping.  Has multiple paths
+    """
+    from astropy.coordinates import EarthLocation
+
+    usph = golden_spiral_grid(128)
+    gcrs = GCRS(usph, obstime='J2000')  # broadcast with times below
+
+    # check array times sure N-d arrays work
+    times = Time(np.linspace(2456293.25, 2456657.25, 51) * u.day,
+                 format='jd')[:, np.newaxis]
+
+    loc = EarthLocation(lon=10 * u.deg, lat=80. * u.deg)
+    hdframe = HADec(obstime=times, location=loc)
+
+    hd1 = gcrs.transform_to(hdframe)
+    hd2 = gcrs.transform_to(ICRS()).transform_to(CIRS()).transform_to(hdframe)
+    hd3 = gcrs.transform_to(ITRS()).transform_to(CIRS()).transform_to(hdframe)
+
+    # make sure they're all consistent
+    assert_allclose(hd1.dec, hd2.dec)
+    assert_allclose(hd1.ha, hd2.ha)
+    assert_allclose(hd1.dec, hd3.dec)
+    assert_allclose(hd1.ha, hd3.ha)
+
+
 def test_precessed_geocentric():
     assert PrecessedGeocentric().equinox.jd == Time('J2000').jd
 
@@ -293,6 +345,27 @@ def test_precessed_geocentric():
     assert_allclose(gcrs_coo.ra, gcrs2_roundtrip.ra)
     assert_allclose(gcrs_coo.dec, gcrs2_roundtrip.dec)
     assert_allclose(gcrs_coo.distance, gcrs2_roundtrip.distance)
+
+
+def test_precessed_geocentric_different_obstime():
+    # Create two PrecessedGeocentric frames with different obstime
+    precessedgeo1 = PrecessedGeocentric(obstime='2021-09-07')
+    precessedgeo2 = PrecessedGeocentric(obstime='2021-06-07')
+
+    # GCRS->PrecessedGeocentric should give different results for the two frames
+    gcrs_coord = GCRS(10*u.deg, 20*u.deg, 3*u.AU, obstime=precessedgeo1.obstime)
+    pg_coord1 = gcrs_coord.transform_to(precessedgeo1)
+    pg_coord2 = gcrs_coord.transform_to(precessedgeo2)
+    assert not pg_coord1.is_equivalent_frame(pg_coord2)
+    assert not allclose(pg_coord1.cartesian.xyz, pg_coord2.cartesian.xyz)
+
+    # Looping back to GCRS should return the original coordinate
+    loopback1 = pg_coord1.transform_to(gcrs_coord)
+    loopback2 = pg_coord2.transform_to(gcrs_coord)
+    assert loopback1.is_equivalent_frame(gcrs_coord)
+    assert loopback2.is_equivalent_frame(gcrs_coord)
+    assert_allclose(loopback1.cartesian.xyz, gcrs_coord.cartesian.xyz)
+    assert_allclose(loopback2.cartesian.xyz, gcrs_coord.cartesian.xyz)
 
 
 # shared by parametrized tests below.  Some use the whole AltAz, others use just obstime
@@ -527,6 +600,57 @@ def test_teme_itrf():
     )
 
 
+def test_precessedgeocentric_loopback():
+    from_coo = PrecessedGeocentric(1*u.deg, 2*u.deg, 3*u.AU,
+                                   obstime='2001-01-01', equinox='2001-01-01')
+
+    # Change just the obstime
+    to_frame = PrecessedGeocentric(obstime='2001-06-30', equinox='2001-01-01')
+
+    explicit_coo = from_coo.transform_to(ICRS()).transform_to(to_frame)
+    implicit_coo = from_coo.transform_to(to_frame)
+
+    # Confirm that the explicit transformation changes the coordinate
+    assert not allclose(explicit_coo.ra, from_coo.ra, rtol=1e-10)
+    assert not allclose(explicit_coo.dec, from_coo.dec, rtol=1e-10)
+    assert not allclose(explicit_coo.distance, from_coo.distance, rtol=1e-10)
+
+    # Confirm that the loopback matches the explicit transformation
+    assert_allclose(explicit_coo.ra, implicit_coo.ra, rtol=1e-10)
+    assert_allclose(explicit_coo.dec, implicit_coo.dec, rtol=1e-10)
+    assert_allclose(explicit_coo.distance, implicit_coo.distance, rtol=1e-10)
+
+    # Change just the equinox
+    to_frame = PrecessedGeocentric(obstime='2001-01-01', equinox='2001-06-30')
+
+    explicit_coo = from_coo.transform_to(ICRS()).transform_to(to_frame)
+    implicit_coo = from_coo.transform_to(to_frame)
+
+    # Confirm that the explicit transformation changes the direction but not the distance
+    assert not allclose(explicit_coo.ra, from_coo.ra, rtol=1e-10)
+    assert not allclose(explicit_coo.dec, from_coo.dec, rtol=1e-10)
+    assert allclose(explicit_coo.distance, from_coo.distance, rtol=1e-10)
+
+    # Confirm that the loopback matches the explicit transformation
+    assert_allclose(explicit_coo.ra, implicit_coo.ra, rtol=1e-10)
+    assert_allclose(explicit_coo.dec, implicit_coo.dec, rtol=1e-10)
+    assert_allclose(explicit_coo.distance, implicit_coo.distance, rtol=1e-10)
+
+
+def test_teme_loopback():
+    from_coo = TEME(1*u.AU, 2*u.AU, 3*u.AU, obstime='2001-01-01')
+    to_frame = TEME(obstime='2001-06-30')
+
+    explicit_coo = from_coo.transform_to(ICRS()).transform_to(to_frame)
+    implicit_coo = from_coo.transform_to(to_frame)
+
+    # Confirm that the explicit transformation changes the coordinate
+    assert not allclose(explicit_coo.cartesian.xyz, from_coo.cartesian.xyz, rtol=1e-10)
+
+    # Confirm that the loopback matches the explicit transformation
+    assert_allclose(explicit_coo.cartesian.xyz, implicit_coo.cartesian.xyz, rtol=1e-10)
+
+
 @pytest.mark.remote_data
 def test_earth_orientation_table(monkeypatch):
     """Check that we can set the IERS table used as Earth Reference.
@@ -626,7 +750,7 @@ def test_tete_transforms():
     moon = SkyCoord(169.24113968*u.deg, 10.86086666*u.deg, 358549.25381755*u.km, frame=gcrs_frame)
 
     tete_frame = TETE(obstime=time, location=loc)
-    # need to set obsgeoloc/vel explicity or skycoord behaviour over-writes
+    # need to set obsgeoloc/vel explicitly or skycoord behaviour over-writes
     tete_geo = TETE(obstime=time, location=EarthLocation(*([0, 0, 0]*u.km)))
 
     # test self-transform by comparing to GCRS-TETE-ITRS-TETE route
@@ -679,8 +803,14 @@ def test_straight_overhead():
     topocentric_cirs_frame = CIRS(obstime=t, location=home)
     cirs_topo = topocentric_cirs_frame.realize_frame(cirs_repr)
 
+    # Check AltAz (though Azimuth can be anything so is not tested).
     aa = cirs_topo.transform_to(AltAz(obstime=t, location=home))
-    assert_allclose(aa.alt, 90*u.deg)
+    assert_allclose(aa.alt, 90*u.deg, atol=1*u.uas, rtol=0)
+
+    # Check HADec.
+    hd = cirs_topo.transform_to(HADec(obstime=t, location=home))
+    assert_allclose(hd.ha, 0*u.hourangle, atol=1*u.uas, rtol=0)
+    assert_allclose(hd.dec, 52*u.deg, atol=1*u.uas, rtol=0)
 
 
 def jplephem_ge(minversion):
@@ -696,7 +826,7 @@ def jplephem_ge(minversion):
 
 @pytest.mark.remote_data
 @pytest.mark.skipif(not jplephem_ge('2.15'), reason='requires jplephem >= 2.15')
-def test_aa_high_precision():
+def test_aa_hd_high_precision():
     """These tests are provided by @mkbrewer - see issue #10356.
 
     The code that produces them agrees very well (<0.5 mas) with SkyField once Polar motion
@@ -711,7 +841,7 @@ def test_aa_high_precision():
 
     NOTE: the agreement reflects consistency in approach between two codes,
     not necessarily absolute precision.  If this test starts failing, the
-    tolerance can and shouls be weakened *if* it is clear that the change is
+    tolerance can and should be weakened *if* it is clear that the change is
     due to an improvement (e.g., a new IAU precession model).
 
     """
@@ -725,6 +855,7 @@ def test_aa_high_precision():
     with solar_system_ephemeris.set('de430'):
         moon = get_body('moon', t, loc)
         moon_aa = moon.transform_to(AltAz(obstime=t, location=loc))
+        moon_hd = moon.transform_to(HADec(obstime=t, location=loc))
 
     # Numbers from
     # https://github.com/astropy/astropy/pull/11073#issuecomment-735486271
@@ -734,6 +865,12 @@ def test_aa_high_precision():
     assert_allclose(moon_aa.az, TARGET_AZ, atol=0.1*u.uas, rtol=0)
     assert_allclose(moon_aa.alt, TARGET_EL, atol=0.1*u.uas, rtol=0)
     assert_allclose(moon_aa.distance, TARGET_DISTANCE, atol=0.1*u.mm, rtol=0)
+    ha, dec = erfa.ae2hd(moon_aa.az.to_value(u.radian), moon_aa.alt.to_value(u.radian),
+                         lat.to_value(u.radian))
+    ha = u.Quantity(ha, u.radian, copy=False)
+    dec = u.Quantity(dec, u.radian, copy=False)
+    assert_allclose(moon_hd.ha, ha, atol=0.1*u.uas, rtol=0)
+    assert_allclose(moon_hd.dec, dec, atol=0.1*u.uas, rtol=0)
 
 
 def test_aa_high_precision_nodata():
@@ -744,7 +881,8 @@ def test_aa_high_precision_nodata():
     with a version of the code that passes the tests above, but for the internal solar system
     ephemerides to avoid the use of remote data.
     """
-    TARGET_AZ, TARGET_EL = 15.0321908*u.deg, 50.30263625*u.deg
+    # Last updated when switching to erfa 2.0.0 and its moon98 function.
+    TARGET_AZ, TARGET_EL = 15.03231495*u.deg, 50.3027193*u.deg
     lat = -22.959748*u.deg
     lon = -67.787260*u.deg
     elev = 5186*u.m

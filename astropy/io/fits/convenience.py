@@ -136,6 +136,11 @@ def getdata(filename, *args, header=None, lower=None, upper=None, view=None,
 
             getdata('in.fits')
 
+        .. note::
+            Exclusive to ``getdata``: if extension is not specified
+            and primary header contains no data, ``getdata`` attempts
+            to retrieve data from first extension.
+
         By extension number::
 
             getdata('in.fits', 0)      # the primary header
@@ -186,22 +191,41 @@ def getdata(filename, *args, header=None, lower=None, upper=None, view=None,
 
         If the optional keyword ``header`` is set to `True`, this
         function will return a (``data``, ``header``) tuple.
+
+    Raises
+    ------
+    IndexError
+        If no data is found in searched extensions.
     """
 
     mode, closed = _get_file_mode(filename)
+
+    ext = kwargs.get('ext')
+    extname = kwargs.get('extname')
+    extver = kwargs.get('extver')
+    ext_given = not (len(args) == 0 and ext is None and
+                     extname is None and extver is None)
 
     hdulist, extidx = _getext(filename, mode, *args, **kwargs)
     try:
         hdu = hdulist[extidx]
         data = hdu.data
-        if data is None and extidx == 0:
-            try:
-                hdu = hdulist[1]
-                data = hdu.data
-            except IndexError:
-                raise IndexError('No data in this HDU.')
         if data is None:
-            raise IndexError('No data in this HDU.')
+            if ext_given:
+                raise IndexError(f"No data in HDU #{extidx}.")
+
+            # fallback to the first non-primary extension
+            if len(hdulist) == 1:
+                raise IndexError(
+                    "No data in Primary HDU and no extension HDU found."
+                    )
+            hdu = hdulist[1]
+            data = hdu.data
+            if data is None:
+                raise IndexError(
+                    "No data in either Primary or first extension HDUs."
+                    )
+
         if header:
             hdr = hdu.header
     finally:
@@ -401,8 +425,8 @@ def writeto(filename, data, header=None, output_verify='exception',
         Output verification option.  Must be one of ``"fix"``, ``"silentfix"``,
         ``"ignore"``, ``"warn"``, or ``"exception"``.  May also be any
         combination of ``"fix"`` or ``"silentfix"`` with ``"+ignore"``,
-        ``+warn``, or ``+exception" (e.g. ``"fix+warn"``).  See :ref:`verify`
-        for more info.
+        ``+warn``, or ``+exception" (e.g. ``"fix+warn"``).  See
+        :ref:`astropy:verify` for more info.
 
     overwrite : bool, optional
         If ``True``, overwrite the output file if it exists. Raises an
@@ -483,11 +507,15 @@ def table_to_hdu(table, character_as_bytes=False):
         default_fill_value = np.ma.default_fill_value(tarray.dtype)
         for colname, (coldtype, _) in tarray.dtype.fields.items():
             if np.all(tarray.fill_value[colname] == default_fill_value[colname]):
-                if issubclass(coldtype.type, np.complexfloating):
+                # Since multi-element columns with dtypes such as '2f8' have
+                # a subdtype, we should look up the type of column on that.
+                coltype = (coldtype.subdtype[0].type
+                           if coldtype.subdtype else coldtype.type)
+                if issubclass(coltype, np.complexfloating):
                     tarray.fill_value[colname] = complex(np.nan, np.nan)
-                elif issubclass(coldtype.type, np.inexact):
+                elif issubclass(coltype, np.inexact):
                     tarray.fill_value[colname] = np.nan
-                elif issubclass(coldtype.type, np.character):
+                elif issubclass(coltype, np.character):
                     tarray.fill_value[colname] = ''
 
         # TODO: it might be better to construct the FITS table directly from
@@ -551,10 +579,9 @@ def table_to_hdu(table, character_as_bytes=False):
                         "though one has to enable the unit before reading.")
                 else:
                     warning += (
-                        "and cannot be recovered in reading. If pyyaml is "
-                        "installed, it can roundtrip within astropy by "
-                        "using QTable both to write and read back, "
-                        "though one has to enable the unit before reading.")
+                        "and cannot be recovered in reading. It can roundtrip "
+                        "within astropy by using QTable both to write and read "
+                        "back, though one has to enable the unit before reading.")
                 warnings.warn(warning, AstropyUserWarning)
 
             else:

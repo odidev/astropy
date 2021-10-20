@@ -1,5 +1,3 @@
-import numpy as np
-
 READ_DOCSTRING = """
     Read the input ``table`` and return the table.  Most of
     the default behavior for various parameters is determined by the Reader
@@ -39,7 +37,9 @@ READ_DOCSTRING = """
         Line index for the end of data not counting comment or blank lines.
         This value can be negative to count from the end.
     converters : dict
-        Dictionary of converters
+        Dictionary of converters. Keys in the dictionary are columns names,
+        values are converter functions. In addition to single column names
+        you can use wildcards via `fnmatch` to select multiple columns.
     data_Splitter : `~astropy.io.ascii.BaseSplitter`
         Splitter class to split data columns
     header_Splitter : `~astropy.io.ascii.BaseSplitter`
@@ -158,12 +158,9 @@ WRITE_DOCSTRING = """
         if available), `False` (do not use fast writer), or ``'force'`` (use
         fast writer and fail if not available, mostly for testing).
     overwrite : bool
-        If ``overwrite=None`` (default) and the file exists, then a
-        warning will be issued. In a future release this will instead
-        generate an exception. If ``overwrite=False`` and the file
-        exists, then an exception is raised.
-        This parameter is ignored when the ``output`` arg is not a string
-        (e.g., a file object).
+        If ``overwrite=False`` (default) and the file exists, then an OSError
+        is raised. This parameter is ignored when the ``output`` arg is not a
+        string (e.g., a file object).
 
     """
 # Specify allowed types for core write() keyword arguments.  Each entry

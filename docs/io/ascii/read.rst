@@ -260,14 +260,6 @@ slicing convention where to select data rows 5 and 6 you would do
 count backward from the end, so ``data_end=-1`` (like ``rows[5:-1]``) would
 work in this case.
 
-.. note::
-
-   Prior to ``astropy`` v1.1, there was a bug in which a blank line that had
-   one or more whitespace characters was mistakenly counted for
-   ``header_start`` but was (correctly) not counted for ``data_start`` and
-   ``data_end``. If you have code that depends on the incorrect pre-1.1
-   behavior then it needs to be modified.
-
 ..
   EXAMPLE END
 
@@ -575,6 +567,15 @@ The default converters for each column can be overridden with the
   >>> import numpy as np
   >>> converters = {'col1': [ascii.convert_numpy(np.uint)],
   ...               'col2': [ascii.convert_numpy(np.float32)]}
+  >>> ascii.read('file.dat', converters=converters)  # doctest: +SKIP
+
+In addition to single column names you can use wildcards via `fnmatch` to
+select multiple columns. For example, we can set the format for all columns
+with a name starting with "col" to an unsigned integer while applying default
+converters to all other columns in the table::
+
+  >>> import numpy as np
+  >>> converters = {'col*': [ascii.convert_numpy(np.uint)]}
   >>> ascii.read('file.dat', converters=converters)  # doctest: +SKIP
 
 

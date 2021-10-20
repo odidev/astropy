@@ -10,6 +10,7 @@ import io
 import copy
 import pytest
 import numpy as np
+from contextlib import nullcontext
 from erfa import ErfaWarning
 
 from astropy import units as u
@@ -28,7 +29,7 @@ from astropy.utils import iers
 from astropy.table import Table
 
 from astropy.tests.helper import assert_quantity_allclose
-from astropy.utils.compat.optional_deps import HAS_SCIPY, HAS_YAML  # noqa
+from astropy.utils.compat.optional_deps import HAS_SCIPY  # noqa
 from astropy.units import allclose as quantity_allclose
 
 
@@ -202,7 +203,6 @@ def test_regression_futuretimes_4302():
 
     Relevant comment: https://github.com/astropy/astropy/pull/4302#discussion_r44836531
     """
-    from astropy.utils.compat.context import nullcontext
     from astropy.utils.exceptions import AstropyWarning
 
     # this is an ugly hack to get the warning to show up even if it has already
@@ -443,7 +443,7 @@ def test_regression_6236():
     assert mf1.representation_type is CartesianRepresentation
     assert mf2.representation_type is CartesianRepresentation
     assert mf2.my_attr == mf1.my_attr
-    # It should be independent of whether I set the reprensentation explicitly
+    # It should be independent of whether I set the representation explicitly
     mf3 = MyFrame(rep1, my_attr=1.*u.km, representation_type='unitspherical')
     mf4 = mf3.realize_frame(rep2)
     assert mf3.data is rep1
@@ -519,7 +519,6 @@ def test_gcrs_itrs_cartesian_repr():
     gcrs.transform_to(ITRS())
 
 
-@pytest.mark.skipif('not HAS_YAML')
 def test_regression_6446():
     # this succeeds even before 6446:
     sc1 = SkyCoord([1, 2], [3, 4], unit='deg')
@@ -536,23 +535,6 @@ def test_regression_6446():
     t2.write(sio2, format='ascii.ecsv')
 
     assert sio1.getvalue() == sio2.getvalue()
-
-
-def test_regression_6448():
-    """
-    This tests the more narrow problem reported in 6446 that 6448 is meant to
-    fix. `test_regression_6446` also covers this, but this test is provided
-    so that this is still tested even if YAML isn't installed.
-    """
-    sc1 = SkyCoord([1, 2], [3, 4], unit='deg')
-    # this should always succeed even prior to 6448
-    assert sc1.galcen_v_sun is None
-
-    c1 = SkyCoord(1, 3, unit='deg')
-    c2 = SkyCoord(2, 4, unit='deg')
-    sc2 = SkyCoord([c1, c2])
-    # without 6448 this fails
-    assert sc2.galcen_v_sun is None
 
 
 def test_regression_6597():
@@ -666,6 +648,16 @@ def test_regression_10092():
         newc = c.apply_space_motion(dt=10*u.year)
     assert_quantity_allclose(newc.pm_l_cosb, 33.99980714*u.mas/u.yr,
                              atol=1.0e-5*u.mas/u.yr)
+
+
+def test_regression_10226():
+    # Dictionary representation of SkyCoord should contain differentials.
+    sc = SkyCoord([270, 280]*u.deg, [30, 35]*u.deg, [10, 11]*u.pc,
+                  radial_velocity=[20, -20]*u.km/u.s)
+    sc_as_dict = sc.info._represent_as_dict()
+    assert 'radial_velocity' in sc_as_dict
+    # But only the components that have been specified.
+    assert 'pm_dec' not in sc_as_dict
 
 
 @pytest.mark.parametrize('mjd', (

@@ -10,6 +10,7 @@ from astropy.io import registry as io_registry
 from astropy.table import Table
 from astropy.table.column import BaseColumn
 from astropy.units import Quantity
+from astropy.utils.misc import NOT_OVERWRITING_MSG
 
 
 def is_votable(origin, filepath, fileobj, *args, **kwargs):
@@ -149,7 +150,7 @@ def write_table_votable(input, output, table_id=None, overwrite=False,
     tabledata_format : str, optional
         The format of table data to write.  Must be one of ``tabledata``
         (text representation), ``binary`` or ``binary2``.  Default is
-        ``tabledata``.  See :ref:`votable-serialization`.
+        ``tabledata``.  See :ref:`astropy:votable-serialization`.
     """
 
     # Only those columns which are instances of BaseColumn or Quantity can be written
@@ -164,7 +165,7 @@ def write_table_votable(input, output, table_id=None, overwrite=False,
         if overwrite:
             os.remove(output)
         else:
-            raise OSError(f"File exists: {output}")
+            raise OSError(NOT_OVERWRITING_MSG.format(output))
 
     # Create a new VOTable file
     table_file = from_table(input, table_id=table_id)

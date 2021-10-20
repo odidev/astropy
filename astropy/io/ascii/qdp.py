@@ -2,7 +2,7 @@
 """
 This package contains functions for reading and writing QDP tables that are
 not meant to be used directly, but instead are available as readers/writers in
-`astropy.table`. See :ref:`table_io` for more details.
+`astropy.table`. See :ref:`astropy:table_io` for more details.
 """
 import re
 import copy
@@ -139,6 +139,8 @@ def _get_lines_from_file(qdp_file):
             lines = [line.strip() for line in fobj.readlines()]
     elif isinstance(qdp_file, Iterable):
         lines = qdp_file
+    else:
+        raise ValueError('invalid value of qdb_file')
 
     return lines
 
@@ -516,6 +518,7 @@ class QDP(basic.Basic):
     """Quick and Dandy Plot table.
 
     Example::
+
         ! Initial comment line 1
         ! Initial comment line 2
         READ TERR 1
@@ -536,9 +539,8 @@ class QDP(basic.Basic):
     of ``NO``s. Comments are exclamation marks, and missing values are single
     ``NO`` entries. The delimiter is usually whitespace, more rarely a comma.
     The QDP format differentiates between data and error columns. The table
-    above has commands
+    above has commands::
 
-    ::
         READ TERR 1
         READ SERR 3
 
@@ -572,6 +574,7 @@ class QDP(basic.Basic):
     and leave the name specification to the user.
 
     Example::
+
         >               Extra space
         >                   |
         >                   v
@@ -584,6 +587,7 @@ class QDP(basic.Basic):
     table. The comments of each table will be stored in the ``comments`` meta.
 
     Example::
+
         t = Table.read(example_qdp, format='ascii.qdp', table_id=1, names=['a', 'b', 'c', 'd'])
 
     reads the second table (``table_id=1``) in file ``example.qdp`` containing
@@ -594,9 +598,8 @@ class QDP(basic.Basic):
     in the file, while ``t.meta['comments']`` will contain ``Table 1 comment``
 
     The table can be written to another file, preserving the same information,
-    as
+    as::
 
-    ::
         t.write(test_file, err_specs={'terr': [1], 'serr': [3]})
 
     Note how the ``terr`` and ``serr`` commands are passed to the writer.

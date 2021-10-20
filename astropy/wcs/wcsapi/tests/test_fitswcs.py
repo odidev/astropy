@@ -8,6 +8,7 @@ from packaging.version import Version
 import numpy as np
 import pytest
 from numpy.testing import assert_equal, assert_allclose
+from itertools import product
 
 from astropy import units as u
 from astropy.time import Time
@@ -400,7 +401,7 @@ CTYPE3A = 'TT' / alternative linear time (TT)
 CRVAL3A = 2440.525 / Relative time of first frame
 CUNIT3A = 's' / Time unit
 CRPIX3A = 1.0 / Pixel coordinate at ref point
-OBSGEO-B= -24.6157 / [deg] Tel geodetic latitute (=North)+
+OBSGEO-B= -24.6157 / [deg] Tel geodetic latitude (=North)+
 OBSGEO-L= -70.3976 / [deg] Tel geodetic longitude (=East)+
 OBSGEO-H= 2530.0000 / [m] Tel height above reference ellipsoid
 CRDER3  = 0.0819 / random error in timings from fit
@@ -1027,3 +1028,42 @@ def test_spectralcoord_frame(header_spectral_frames):
             # the spectral coordinate unchanged
             sc_check = sc.with_observer_stationary_relative_to(expected_frame)
             assert_quantity_allclose(sc.quantity, sc_check.quantity)
+
+
+@pytest.mark.parametrize(('ctype3', 'observer'), product(['ZOPT', 'BETA', 'VELO', 'VRAD', 'VOPT'], [False, True]))
+def test_different_ctypes(header_spectral_frames, ctype3, observer):
+
+    header = header_spectral_frames.copy()
+    header['CTYPE3'] = ctype3
+    header['CRVAL3'] = 0.1
+    header['CDELT3'] = 0.001
+
+    if ctype3[0] == 'V':
+        header['CUNIT3'] = 'm s-1'
+    else:
+        header['CUNIT3'] = ''
+
+    header['RESTWAV'] = 1.420405752E+09
+    header['MJD-OBS'] = 55197
+
+    if observer:
+        header['OBSGEO-L'] = 144.2
+        header['OBSGEO-B'] = -20.2
+        header['OBSGEO-H'] = 0.
+        header['SPECSYS'] = 'BARYCENT'
+
+    with warnings.catch_warnings():
+        warnings.simplefilter('ignore', FITSFixedWarning)
+        wcs = WCS(header)
+
+    skycoord, spectralcoord = wcs.pixel_to_world(0, 0, 31)
+
+    assert isinstance(spectralcoord, SpectralCoord)
+
+    if observer:
+        pix = wcs.world_to_pixel(skycoord, spectralcoord)
+    else:
+        with pytest.warns(AstropyUserWarning, match='No observer defined on WCS'):
+            pix = wcs.world_to_pixel(skycoord, spectralcoord)
+
+    assert_allclose(pix, [0, 0, 31], rtol=1e-6)

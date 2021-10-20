@@ -1,16 +1,20 @@
 # -*- coding: utf-8 -*-
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
-"""Test initalization and other aspects of Angle and subclasses"""
+"""Test initialization and other aspects of Angle and subclasses"""
 
-import pytest
-import numpy as np
-from numpy.testing import assert_allclose, assert_array_equal
 import threading
+import warnings
 
+import numpy as np
+import pytest
+from numpy.testing import assert_allclose, assert_array_equal
+
+import astropy.units as u
 from astropy.coordinates.angles import Longitude, Latitude, Angle
-from astropy import units as u
-from astropy.coordinates.errors import (IllegalSecondError, IllegalMinuteError, IllegalHourError,
-                      IllegalSecondWarning, IllegalMinuteWarning)
+from astropy.coordinates.errors import (
+    IllegalSecondError, IllegalMinuteError, IllegalHourError,
+    IllegalSecondWarning, IllegalMinuteWarning)
+from astropy.utils.exceptions import AstropyDeprecationWarning
 
 
 def test_create_angles():
@@ -788,6 +792,17 @@ def test_longitude():
     lon3 = Longitude(lon, wrap_angle='180d')
     assert lon3.wrap_angle == 180 * u.deg
 
+    # check that wrap_angle is always an Angle
+    lon = Longitude(lon, wrap_angle=Longitude(180 * u.deg))
+    assert lon.wrap_angle == 180 * u.deg
+    assert lon.wrap_angle.__class__ is Angle
+
+    # check that wrap_angle is not copied
+    wrap_angle=180 * u.deg
+    lon = Longitude(lon, wrap_angle=wrap_angle)
+    assert lon.wrap_angle == 180 * u.deg
+    assert np.may_share_memory(lon.wrap_angle, wrap_angle)
+
     # check for problem reported in #2037 about Longitude initializing to -0
     lon = Longitude(0, u.deg)
     lonstr = lon.to_string()
@@ -1031,3 +1046,52 @@ def test_angle_multithreading():
         Angle(angles, unit='hour')
     for i in range(10):
         threading.Thread(target=parse_test, args=(i,)).start()
+
+
+@pytest.mark.parametrize("cls", [Angle, Longitude, Latitude])
+@pytest.mark.parametrize("input, expstr, exprepr",
+                         [(np.nan*u.deg,
+                           "nan",
+                           "nan deg"),
+                          ([np.nan, 5, 0]*u.deg,
+                           "[nan 5d00m00s 0d00m00s]",
+                           "[nan, 5., 0.] deg"),
+                          ([6, np.nan, 0]*u.deg,
+                           "[6d00m00s nan 0d00m00s]",
+                           "[6., nan, 0.] deg"),
+                          ([np.nan, np.nan, np.nan]*u.deg,
+                           "[nan nan nan]",
+                           "[nan, nan, nan] deg"),
+                          (np.nan*u.hour,
+                           "nan",
+                           "nan hourangle"),
+                          ([np.nan, 5, 0]*u.hour,
+                           "[nan 5h00m00s 0h00m00s]",
+                           "[nan, 5., 0.] hourangle"),
+                          ([6, np.nan, 0]*u.hour,
+                           "[6h00m00s nan 0h00m00s]",
+                           "[6., nan, 0.] hourangle"),
+                          ([np.nan, np.nan, np.nan]*u.hour,
+                           "[nan nan nan]",
+                           "[nan, nan, nan] hourangle"),
+                          (np.nan*u.rad,
+                           "nan",
+                           "nan rad"),
+                          ([np.nan, 1, 0]*u.rad,
+                           "[nan 1rad 0rad]",
+                           "[nan, 1., 0.] rad"),
+                          ([1.50, np.nan, 0]*u.rad,
+                           "[1.5rad nan 0rad]",
+                           "[1.5, nan, 0.] rad"),
+                          ([np.nan, np.nan, np.nan]*u.rad,
+                           "[nan nan nan]",
+                           "[nan, nan, nan] rad")])
+def test_str_repr_angles_nan(cls, input, expstr, exprepr):
+    """
+    Regression test for issue #11473
+    """
+    q = cls(input)
+    assert str(q) == expstr
+    # Deleting whitespaces since repr appears to be adding them for some values
+    # making the test fail.
+    assert repr(q).replace(" ", "") == f'<{cls.__name__}{exprepr}>'.replace(" ","")

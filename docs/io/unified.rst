@@ -190,7 +190,7 @@ detection.
                       ascii    Yes          ASCII table in any supported format (uses guessing)
                ascii.aastex    Yes          :class:`~astropy.io.ascii.AASTex`: AASTeX deluxetable used for AAS journals
                 ascii.basic    Yes          :class:`~astropy.io.ascii.Basic`: Basic table with custom delimiters
-                  ascii.cds     No          :class:`~astropy.io.ascii.Cds`: CDS format table
+                  ascii.cds    Yes          :class:`~astropy.io.ascii.Cds`: CDS format table
      ascii.commented_header    Yes          :class:`~astropy.io.ascii.CommentedHeader`: Column names in a commented line
                   ascii.csv    Yes    .csv  :class:`~astropy.io.ascii.Csv`: Basic table with comma-separated values
               ascii.daophot     No          :class:`~astropy.io.ascii.Daophot`: IRAF DAOphot format table
@@ -281,10 +281,6 @@ column use:
      >>> dat = ascii.read('file.dat', format='daophot')
      >>> dat = Table.read('file.dat', format='ascii.daophot')
 
-   For compatibility with ``astropy`` version 0.2 and earlier, the following
-   format values are also allowed in ``Table.read()``: ``daophot``, ``ipac``,
-   ``html``, ``latex``, and ``rdb``.
-
 .. attention:: **ECSV is recommended**
 
    For writing and reading tables to ASCII in a way that fully reproduces the
@@ -361,12 +357,11 @@ Alternatively, you can use the convenience function
 binary table HDU and insert or append that to an existing
 :class:`~astropy.io.fits.HDUList`.
 
-As of ``astropy`` version 3.0 there is support for writing a table which
-contains :ref:`mixin_columns` such as `~astropy.time.Time` or
-`~astropy.coordinates.SkyCoord`. This uses FITS ``COMMENT`` cards to capture
-additional information needed order to fully reconstruct the mixin columns when
-reading back from FITS. The information is a Python `dict` structure which is
-serialized using YAML.
+There is support for writing a table which contains :ref:`mixin_columns` such
+as `~astropy.time.Time` or `~astropy.coordinates.SkyCoord`. This uses FITS
+``COMMENT`` cards to capture additional information needed order to fully
+reconstruct the mixin columns when reading back from FITS. The information is a
+Python `dict` structure which is serialized using YAML.
 
 Keywords
 ^^^^^^^^
@@ -456,7 +451,7 @@ Python strings map to the TDISP format A if the Python formatting string does
 not contain right space padding. It will accept left space padding. The same
 applies to the logical format L.
 
-The integer formats (decimal integer, binary, octal, hexidecimal) map to the
+The integer formats (decimal integer, binary, octal, hexadecimal) map to the
 I, B, O, and Z TDISP formats respectively. Integer formats do not accept a
 zero padded format string or a format string with no left padding defined (a
 width is required in the TDISP format standard for the Integer formats).

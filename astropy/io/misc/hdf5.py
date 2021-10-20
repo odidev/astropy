@@ -2,7 +2,7 @@
 """
 This package contains functions for reading and writing HDF5 tables that are
 not meant to be used directly, but instead are available as readers/writers in
-`astropy.table`. See :ref:`table_io` for more details.
+`astropy.table`. See :ref:`astropy:table_io` for more details.
 """
 
 import os
@@ -13,6 +13,7 @@ import numpy as np
 # NOTE: Do not import anything from astropy.table here.
 # https://github.com/astropy/astropy/issues/6604
 from astropy.utils.exceptions import AstropyUserWarning
+from astropy.utils.misc import NOT_OVERWRITING_MSG
 
 HDF5_SIGNATURE = b'\x89HDF\r\n\x1a\n'
 META_KEY = '__table_column_meta__'
@@ -162,7 +163,8 @@ def read_table_hdf5(input, path=None, character_as_bytes=True):
         if new_version_meta:
             header = meta.get_header_from_yaml(
                 h.decode('utf-8') for h in input_save[meta_path(path)])
-        elif old_version_meta:
+        else:
+            # Must be old_version_meta is True. if (A or B) and not A then B is True
             header = meta.get_header_from_yaml(
                 h.decode('utf-8') for h in input.attrs[META_KEY])
         if 'meta' in list(header.keys()):
@@ -193,24 +195,8 @@ def _encode_mixins(tbl):
     astropy Columns + appropriate meta-data to allow subsequent decoding.
     """
     from astropy.table import serialize
-    from astropy.table.table import has_info_class
     from astropy import units as u
-    from astropy.utils.data_info import MixinInfo, serialize_context_as
-
-    # If PyYAML is not available then check to see if there are any mixin cols
-    # that *require* YAML serialization.  HDF5 already has support for
-    # Quantity, so if those are the only mixins the proceed without doing the
-    # YAML bit, for backward compatibility (i.e. not requiring YAML to write
-    # Quantity).
-    try:
-        import yaml  # noqa
-    except ImportError:
-        for col in tbl.itercols():
-            if (has_info_class(col, MixinInfo) and
-                    col.__class__ is not u.Quantity):
-                raise TypeError("cannot write type {} column '{}' "
-                                "to HDF5 without PyYAML installed."
-                                .format(col.__class__.__name__, col.info.name))
+    from astropy.utils.data_info import serialize_context_as
 
     # Convert the table to one with no mixins, only Column objects.  This adds
     # meta data which is extracted with meta.get_yaml_from_table.
@@ -296,7 +282,7 @@ def write_table_hdf5(table, output, path=None, compression=False,
             if overwrite and not append:
                 os.remove(output)
             else:
-                raise OSError(f"File exists: {output}")
+                raise OSError(NOT_OVERWRITING_MSG.format(output))
 
         # Open the file for appending or writing
         f = h5py.File(output, 'a' if append else 'w')

@@ -19,6 +19,7 @@ from astropy.units import Quantity, QuantityInfo
 from astropy.utils import isiterable, ShapedLikeNDArray
 from astropy.utils.console import color_print
 from astropy.utils.exceptions import AstropyUserWarning
+from astropy.utils.masked import Masked
 from astropy.utils.metadata import MetaData, MetaAttribute
 from astropy.utils.data_info import BaseColumnInfo, MixinInfo, DataInfo
 from astropy.utils.decorators import format_doc
@@ -1271,7 +1272,7 @@ class Table:
                 data = np.array(data, dtype=object)
                 col_cls = self.ColumnClass
 
-        elif isinstance(data, np.ma.MaskedArray):
+        elif isinstance(data, (np.ma.MaskedArray, Masked)):
             # Require that col_cls be a subclass of MaskedColumn, remembering
             # that ColumnClass could be a user-defined subclass (though more-likely
             # could be MaskedColumn).
@@ -1573,8 +1574,8 @@ class Table:
         if isinstance(col, BaseColumn):
             return False
 
-        # Is it a mixin but not not Quantity (which gets converted to Column with
-        # unit set).
+        # Is it a mixin but not [Masked]Quantity (which gets converted to
+        # [Masked]Column with unit set).
         return has_info_class(col, MixinInfo) and not has_info_class(col, QuantityInfo)
 
     @format_doc(_pprint_docs)
@@ -2238,6 +2239,9 @@ class Table:
             Uniquify new column names if they duplicate the existing ones.
             Default is False.
 
+        See Also
+        --------
+        astropy.table.hstack, update, replace_column
 
         Examples
         --------
@@ -2313,6 +2317,8 @@ class Table:
         Same as replace_column but issues warnings under various circumstances.
         """
         warns = conf.replace_warnings
+        refcount = None
+        old_col = None
 
         if 'refcount' in warns and name in self.colnames:
             refcount = sys.getrefcount(self[name])
@@ -2383,6 +2389,10 @@ class Table:
             New column object to replace the existing column.
         copy : bool
             Make copy of the input ``col``, default=True
+
+        See Also
+        --------
+        add_columns, astropy.table.hstack, update
 
         Examples
         --------
@@ -3023,10 +3033,10 @@ class Table:
         else:
             raise TypeError('Vals must be an iterable or mapping or None')
 
+        # Insert val at index for each column
         columns = self.TableColumns()
-        try:
-            # Insert val at index for each column
-            for name, col, val, mask_ in zip(colnames, self.columns.values(), vals, mask):
+        for name, col, val, mask_ in zip(colnames, self.columns.values(), vals, mask):
+            try:
                 # If new val is masked and the existing column does not support masking
                 # then upgrade the column to a mask-enabled type: either the table-level
                 # default ColumnClass or else MaskedColumn.
@@ -3054,19 +3064,18 @@ class Table:
 
                 columns[name] = newcol
 
-            # insert row in indices
-            for table_index in self.indices:
-                table_index.insert_row(index, vals, self.columns.values())
+            except Exception as err:
+                raise ValueError("Unable to insert row because of exception in column '{}':\n{}"
+                                 .format(name, err)) from err
 
-        except Exception as err:
-            raise ValueError("Unable to insert row because of exception in column '{}':\n{}"
-                             .format(name, err))
-        else:
-            self._replace_cols(columns)
+        for table_index in self.indices:
+            table_index.insert_row(index, vals, self.columns.values())
 
-            # Revert groups to default (ungrouped) state
-            if hasattr(self, '_groups'):
-                del self._groups
+        self._replace_cols(columns)
+
+        # Revert groups to default (ungrouped) state
+        if hasattr(self, '_groups'):
+            del self._groups
 
     def _replace_cols(self, columns):
         for col, new_col in zip(self.columns.values(), columns.values()):
@@ -3076,6 +3085,67 @@ class Table:
                 new_col.info.indices.append(index)
 
         self.columns = columns
+
+    def update(self, other, copy=True):
+        """
+        Perform a dictionary-style update and merge metadata.
+
+        The argument ``other`` must be a |Table|, or something that can be used
+        to initialize a table. Columns from (possibly converted) ``other`` are
+        added to this table. In case of matching column names the column from
+        this table is replaced with the one from ``other``.
+
+        Parameters
+        ----------
+        other : table-like
+            Data to update this table with.
+        copy : bool
+            Whether the updated columns should be copies of or references to
+            the originals.
+
+        See Also
+        --------
+        add_columns, astropy.table.hstack, replace_column
+
+        Examples
+        --------
+        Update a table with another table::
+
+            >>> t1 = Table({'a': ['foo', 'bar'], 'b': [0., 0.]}, meta={'i': 0})
+            >>> t2 = Table({'b': [1., 2.], 'c': [7., 11.]}, meta={'n': 2})
+            >>> t1.update(t2)
+            >>> t1
+            <Table length=2>
+             a      b       c
+            str3 float64 float64
+            ---- ------- -------
+             foo     1.0     7.0
+             bar     2.0    11.0
+            >>> t1.meta
+            {'i': 0, 'n': 2}
+
+        Update a table with a dictionary::
+
+            >>> t = Table({'a': ['foo', 'bar'], 'b': [0., 0.]})
+            >>> t.update({'b': [1., 2.]})
+            >>> t
+            <Table length=2>
+             a      b
+            str3 float64
+            ---- -------
+             foo     1.0
+             bar     2.0
+        """
+        from .operations import _merge_table_meta
+        if not isinstance(other, Table):
+            other = self.__class__(other, copy=copy)
+        common_cols = set(self.colnames).intersection(other.colnames)
+        for name, col in other.items():
+            if name in common_cols:
+                self.replace_column(name, col, copy=copy)
+            else:
+                self.add_column(col, name=name, copy=copy)
+        _merge_table_meta(self, [self, other], metadata_conflicts='silent')
 
     def argsort(self, keys=None, kind=None, reverse=False):
         """
@@ -3618,6 +3688,11 @@ class Table:
                     new_cols.append(new_col)
                 tbl = tbl.__class__(new_cols, copy=False)
 
+                # Certain subclasses (e.g. TimeSeries) may generate new indices on
+                # table creation, so make sure there are no indices on the table.
+                for col in tbl.itercols():
+                    col.info.indices.clear()
+
                 for col in time_cols:
                     if isinstance(col, TimeDelta):
                         # Convert to nanoseconds (matches astropy datetime64 support)
@@ -3682,7 +3757,13 @@ class Table:
                 if isinstance(v, Series):
                     v.index = idx
 
-        return DataFrame(out, **kwargs)
+        df = DataFrame(out, **kwargs)
+        if index:
+            # Explicitly set the pandas DataFrame index to the original table
+            # index name.
+            df.index.name = idx.info.name
+
+        return df
 
     @classmethod
     def from_pandas(cls, dataframe, index=False, units=None):
@@ -3735,11 +3816,11 @@ class Table:
 
           >>> QTable.from_pandas(df)
           <QTable length=2>
-                    time            dt      x
-                   object         object float64
-          ----------------------- ------ -------
-          1998-01-01T00:00:00.000    1.0     3.0
-          2002-01-01T00:00:00.000  300.0     4.0
+                    time              dt       x
+                    Time          TimeDelta float64
+          ----------------------- --------- -------
+          1998-01-01T00:00:00.000       1.0     3.0
+          2002-01-01T00:00:00.000     300.0     4.0
 
         """
 
@@ -3869,26 +3950,17 @@ class QTable(Table):
 
     def _convert_col_for_table(self, col):
         if isinstance(col, Column) and getattr(col, 'unit', None) is not None:
-            # We need to turn the column into a quantity, or a subclass
-            # identified in the unit (such as u.mag()).
-            q_cls = getattr(col.unit, '_quantity_class', Quantity)
+            # We need to turn the column into a quantity; use subok=True to allow
+            # Quantity subclasses identified in the unit (such as u.mag()).
+            q_cls = Masked(Quantity) if isinstance(col, MaskedColumn) else Quantity
             try:
-                qcol = q_cls(col.data, col.unit, copy=False)
+                qcol = q_cls(col.data, col.unit, copy=False, subok=True)
             except Exception as exc:
                 warnings.warn(f"column {col.info.name} has a unit but is kept as "
                               f"a {col.__class__.__name__} as an attempt to "
                               f"convert it to Quantity failed with:\n{exc!r}",
                               AstropyUserWarning)
             else:
-                # What to do with MaskedColumn with units: leave as MaskedColumn or
-                # turn into Quantity and drop mask?  Assuming we have masking support
-                # in Quantity someday, let's drop the mask (consistent with legacy
-                # behavior) but issue a warning.
-                if isinstance(col, MaskedColumn) and np.any(col.mask):
-                    warnings.warn("dropping mask in Quantity column '{}': "
-                                  "masked Quantity not supported".format(col.info.name),
-                                  AstropyUserWarning)
-
                 qcol.info = col.info
                 qcol.info.indices = col.info.indices
                 col = qcol

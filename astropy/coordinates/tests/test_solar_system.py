@@ -99,6 +99,7 @@ def test_positions_skyfield(tmpdir):
             skyfield_angular_separation_tolerance)
     assert (mercury_astropy.separation_3d(skyfield_mercury) <
             skyfield_separation_tolerance)
+    planets.close()
 
 
 class TestPositionsGeocentric:
@@ -278,6 +279,7 @@ class TestPositionKittPeak:
 
 
 @pytest.mark.remote_data
+@pytest.mark.skipif('not HAS_JPLEPHEM')
 def test_horizons_consistency_with_precision():
     """
     A test to compare at high precision against output of JPL horizons.
@@ -378,10 +380,12 @@ def test_earth_barycentric_velocity_multi_d():
 @pytest.mark.parametrize(('body', 'pos_tol', 'vel_tol'),
                          (('mercury', 1000.*u.km, 1.*u.km/u.s),
                           ('jupiter', 100000.*u.km, 2.*u.km/u.s),
-                          ('earth', 10*u.km, 10*u.mm/u.s)))
+                          ('earth', 10*u.km, 10*u.mm/u.s),
+                          ('moon', 18*u.km, 50*u.mm/u.s)))
 def test_barycentric_velocity_consistency(body, pos_tol, vel_tol):
     # Tolerances are about 1.5 times the rms listed for plan94 and epv00,
-    # except for Mercury (which nominally is 334 km rms)
+    # except for Mercury (which nominally is 334 km rms), and the Moon
+    # (which nominally is 6 km rms).
     t = Time('2016-03-20T12:30:00')
     ep, ev = get_body_barycentric_posvel(body, t, ephemeris='builtin')
     dp, dv = get_body_barycentric_posvel(body, t, ephemeris='de432s')
@@ -435,8 +439,12 @@ def test_file_ephemeris_wrong_input():
     # Try loading a non-existing file:
     with pytest.raises(ValueError):
         get_body('earth', time, ephemeris='/path/to/nonexisting/file.bsp')
+
+    # NOTE: This test currently leaves the file open (ResourceWarning).
+    # To fix this issue, an upstream fix is required in jplephem
+    # package.
     # Try loading a file that does exist, but is not an ephemeris file:
-    with pytest.raises(ValueError):
+    with pytest.warns(ResourceWarning), pytest.raises(ValueError):
         get_body('earth', time, ephemeris=__file__)
 
 

@@ -26,7 +26,7 @@ from astropy import units as u
 from astropy.time import Time, TimeDelta
 from .conftest import MaskedTable, MIXIN_COLS
 
-from astropy.utils.compat.optional_deps import HAS_PANDAS, HAS_YAML  # noqa
+from astropy.utils.compat.optional_deps import HAS_PANDAS  # noqa
 
 
 class SetupData:
@@ -1682,7 +1682,7 @@ def test_unicode_policy():
 @pytest.mark.parametrize('uni', ['питона', 'ascii'])
 def test_unicode_bytestring_conversion(table_types, uni):
     """
-    Test converting columns to all unicode or all bytestring.  Thi
+    Test converting columns to all unicode or all bytestring.  This
     makes two columns, one which is unicode (str in Py3) and one which
     is bytes (UTF-8 encoded).  There are two code paths in the conversions,
     a faster one where the data are actually ASCII and a slower one where
@@ -1897,8 +1897,21 @@ class TestPandas:
         assert np.allclose(t2['dt'].value, [0, 2, 4, 6])
         assert t2['dt'].format == 'sec'
 
-    def test_to_pandas_index(self):
+    @pytest.mark.parametrize('use_IndexedTable', [False, True])
+    def test_to_pandas_index(self, use_IndexedTable):
+        """Test to_pandas() with different indexing options.
+
+        This also tests the fix for #12014. The exception seen there is
+        reproduced here without the fix.
+        """
         import pandas as pd
+
+        class IndexedTable(table.QTable):
+            """Always index the first column"""
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+                self.add_index(self.colnames[0])
+
         row_index = pd.RangeIndex(0, 2, 1)
         tm_index = pd.DatetimeIndex(['1998-01-01', '2002-01-01'],
                                     dtype='datetime64[ns]',
@@ -1906,14 +1919,16 @@ class TestPandas:
 
         tm = Time([1998, 2002], format='jyear')
         x = [1, 2]
-        t = table.QTable([tm, x], names=['tm', 'x'])
+        table_cls = IndexedTable if use_IndexedTable else table.QTable
+        t = table_cls([tm, x], names=['tm', 'x'])
         tp = t.to_pandas()
-        assert np.all(tp.index == row_index)
 
-        tp = t.to_pandas(index='tm')
-        assert np.all(tp.index == tm_index)
+        if not use_IndexedTable:
+            assert np.all(tp.index == row_index)
+            tp = t.to_pandas(index='tm')
+            assert np.all(tp.index == tm_index)
+            t.add_index('tm')
 
-        t.add_index('tm')
         tp = t.to_pandas()
         assert np.all(tp.index == tm_index)
         # Make sure writing to pandas didn't hack the original table
@@ -2192,6 +2207,100 @@ class Test__Astropy_Table__():
         assert '__init__() got unexpected keyword argument' in str(err.value)
 
 
+class TestUpdate():
+
+    def _setup(self):
+        self.a = Column((1, 2, 3), name='a')
+        self.b = Column((4, 5, 6), name='b')
+        self.c = Column((7, 8, 9), name='c')
+        self.d = Column((10, 11, 12), name='d')
+
+    def test_different_lengths(self):
+        self._setup()
+        t1 = Table([self.a])
+        t2 = Table([self.b[:-1]])
+        msg = 'Inconsistent data column lengths'
+        with pytest.raises(ValueError, match=msg):
+            t1.update(t2)
+        # If update didn't succeed then t1 and t2 should not have changed.
+        assert t1.colnames == ['a']
+        assert np.all(t1['a'] == self.a)
+        assert t2.colnames == ['b']
+        assert np.all(t2['b'] == self.b[:-1])
+
+    def test_invalid_inputs(self):
+        # If input is invalid then nothing should be modified.
+        self._setup()
+        t = Table([self.a])
+        d = {'b': self.b, 'c': [0]}
+        msg = 'Inconsistent data column lengths: {1, 3}'
+        with pytest.raises(ValueError, match=msg):
+            t.update(d)
+        assert t.colnames == ['a']
+        assert np.all(t['a'] == self.a)
+        assert d == {'b': self.b, 'c': [0]}
+
+    def test_metadata_conflict(self):
+        self._setup()
+        t1 = Table([self.a], meta={'a': 0, 'b': [0], 'c': True})
+        t2 = Table([self.b], meta={'a': 1, 'b': [1]})
+        t2meta = copy.deepcopy(t2.meta)
+        t1.update(t2)
+        assert t1.meta == {'a': 1, 'b': [0, 1], 'c': True}
+        # t2 metadata should not have changed.
+        assert t2.meta == t2meta
+
+    def test_update(self):
+        self._setup()
+        t1 = Table([self.a, self.b])
+        t2 = Table([self.b, self.c])
+        t2['b'] += 1
+        t1.update(t2)
+        assert t1.colnames == ['a', 'b', 'c']
+        assert np.all(t1['a'] == self.a)
+        assert np.all(t1['b'] == self.b+1)
+        assert np.all(t1['c'] == self.c)
+        # t2 should not have changed.
+        assert t2.colnames == ['b', 'c']
+        assert np.all(t2['b'] == self.b+1)
+        assert np.all(t2['c'] == self.c)
+
+        d = {'b': list(self.b), 'd': list(self.d)}
+        dc = copy.deepcopy(d)
+        t2.update(d)
+        assert t2.colnames == ['b', 'c', 'd']
+        assert np.all(t2['b'] == self.b)
+        assert np.all(t2['c'] == self.c)
+        assert np.all(t2['d'] == self.d)
+        # d should not have changed.
+        assert d == dc
+
+        # Columns were copied, so changing t2 shouldn't have affected t1.
+        assert t1.colnames == ['a', 'b', 'c']
+        assert np.all(t1['a'] == self.a)
+        assert np.all(t1['b'] == self.b+1)
+        assert np.all(t1['c'] == self.c)
+
+    def test_update_without_copy(self):
+        self._setup()
+        t1 = Table([self.a, self.b])
+        t2 = Table([self.b, self.c])
+        t1.update(t2, copy=False)
+        t2['b'] -= 1
+        assert t1.colnames == ['a', 'b', 'c']
+        assert np.all(t1['a'] == self.a)
+        assert np.all(t1['b'] == self.b-1)
+        assert np.all(t1['c'] == self.c)
+
+        d = {'b': np.array(self.b), 'd': np.array(self.d)}
+        t2.update(d, copy=False)
+        d['b'] *= 2
+        assert t2.colnames == ['b', 'c', 'd']
+        assert np.all(t2['b'] == 2*self.b)
+        assert np.all(t2['c'] == self.c)
+        assert np.all(t2['d'] == self.d)
+
+
 def test_table_meta_copy():
     """
     Test no copy vs light (key) copy vs deep copy of table meta for different
@@ -2466,7 +2575,7 @@ def test_create_table_from_final_row():
 
 
 def test_key_values_in_as_array():
-    # Test for cheking column slicing using key_values in Table.as_array()
+    # Test for checking column slicing using key_values in Table.as_array()
     data_rows = [(1, 2.0, 'x'),
                  (4, 5.0, 'y'),
                  (5, 8.2, 'z')]
@@ -2477,7 +2586,7 @@ def test_key_values_in_as_array():
     # Values of sliced column a,b is stored in a numpy array
     a = np.array([(1, 2.), (4, 5.), (5, 8.2)],
                  dtype=[('a', '<i4'), ('b', '<f8')])
-    # Values fo sliced column c is stored in a numpy array
+    # Values for sliced column c is stored in a numpy array
     b = np.array([(b'x',), (b'y',), (b'z',)], dtype=[('c', 'S1')])
     # Comparing initialised array with sliced array using Table.as_array()
     assert np.array_equal(a, t1.as_array(names=['a', 'b']))
@@ -2560,7 +2669,6 @@ def test_table_attribute():
     assert '__attributes__' not in t.meta
 
 
-@pytest.mark.skipif('not HAS_YAML')
 def test_table_attribute_ecsv():
     # Table attribute round-trip through ECSV
     t = MyTable([[1, 2]], bar=[2.0], baz='baz')
@@ -2863,3 +2971,12 @@ def test_items():
 
     for i in list(t.items()):
         assert isinstance(i, tuple)
+
+
+def test_read_write_not_replaceable():
+    t = table.Table()
+    with pytest.raises(AttributeError):
+        t.read = 'fake_read'
+
+    with pytest.raises(AttributeError):
+        t.write = 'fake_write'
